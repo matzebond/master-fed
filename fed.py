@@ -104,8 +104,8 @@ def run(r_pipe, w_pipe, barrier):
         gstep += 1
 
 
-    public_dls  = {"public_train", public_train_dl,
-                   "public_test", public_test_dl}
+    public_dls  = {"public_train": public_train_dl,
+                   "public_test": public_test_dl}
     private_dls = {"private_train": private_dl,
                    "private_test": private_test_dl}
 
