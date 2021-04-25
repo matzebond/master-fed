@@ -49,7 +49,7 @@ def load_idx_from_artifact(targets, parties, subclasses, samples_per_class):
         np.save('private_partial_train_idx.npy', idxs)
         idx_artifact.add_file('private_partial_train_idx.npy')
         wandb.log_artifact(idx_artifact)
-    return idxs
+    return idxs[:parties]
 
 
 
@@ -70,7 +70,7 @@ def build_private_dls(private_train_data, private_test_data,
 
 
     private_combined_dl = DataLoader(Subset(private_train_data,
-                                                  np.vstack(private_idx)),
+                                                  np.concatenate(private_idx)),
                                            batch_size=batch_size,
                                            collate_fn=collate_fn, shuffle=True)
 
