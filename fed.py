@@ -3,13 +3,13 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, Subset, TensorDataset
 from torch.utils.tensorboard import SummaryWriter
+import torch.multiprocessing as mp
+from torch.multiprocessing import Barrier, Process, Pipe
 import ignite
 from ignite import metrics
 from ignite.engine import Engine, Events, create_supervised_trainer, create_supervised_evaluator
 import wandb
 from itertools import *
-from multiprocessing import Barrier, Process, Pipe, current_process
-from multiprocessing.connection import wait
 import dill
 import os
 from pathlib import Path
@@ -226,13 +226,13 @@ def main():
         'load_private_idx': True,
         'optim': 'Adam',
         'public_lr': 0.001,
-        'public_epochs': 0,
+        'public_epochs': 10,
         'public_batch_size': 64,
         'private_init_epochs': 10,
         'private_init_batch_size': 32,
         'collab_rounds': 10,
         'alignment_mode': 'public',
-        'num_alignment': 100,
+        'num_alignment': 2000,
         'logits_matching_epochs': 10,
         'logits_matching_batchsize': 128,
         'private_training_epochs': 1,
@@ -367,4 +367,5 @@ def main():
 
 
 if __name__ == '__main__':
+    mp.set_start_method('spawn')#, force=True)
     main()
