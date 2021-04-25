@@ -215,13 +215,12 @@ def run(r_pipe, w_pipe, barrier):
 
 def main():
     cfg = {
-        'main_id': wandb.util.generate_id(),
         'group': wandb.util.generate_id(),
         'samples_per_class': 3,
         'dataset': 'CIFAR100',
         'data_variant': 'iid',
         'subclasses': [0,2,20,63,71,82],
-        'parties': 3,
+        'parties': 10,
         'load_private_idx': True,
         'optim': 'Adam',
         'public_lr': 0.001,
@@ -240,8 +239,8 @@ def main():
         'stages': ['pre-public', 'pre-private', 'init-private', 'collab', 'lower', 'upper'],
     }
 
-    # model_mapping =  list(islice(cycle(range(len(FedMD.FedMD_CIFAR_hyper))), cfg['parties']))
-    model_mapping = list(repeat(4, cfg['parties']))
+    model_mapping =  list(islice(cycle(range(len(FedMD.FedMD_CIFAR_hyper))), cfg['parties']))
+    # model_mapping = list(repeat(4, cfg['parties']))
 
 
     processes = []
@@ -266,7 +265,7 @@ def main():
         pipes.append((m_recv, m_send))
 
     wandb.init(project='mp-test', entity='maschm',
-               group=cfg['group'], job_type="master", id=cfg['main_id'],
+               group=cfg['group'], job_type="master", name=cfg['group'],
                config=cfg, config_exclude_keys=['main_id', 'group', 'rank', 'model'])
 
     import CIFAR
