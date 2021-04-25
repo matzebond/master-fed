@@ -68,6 +68,16 @@ def run(r_pipe, w_pipe, barrier):
     loss_metric = metrics.Loss(nn.CrossEntropyLoss())
     evaluator = create_supervised_evaluator(model, metrics={"acc": metrics.Accuracy(),
                                                             "loss": loss_metric})
+
+    # @trainer.on(Events.ITERATION_COMPLETED)
+    def log_training(engine):
+        batch_loss = engine.state.output
+        e = engine.state.epoch
+        n = engine.state.max_epochs
+        i = engine.state.iteration
+        print(f"Epoch {e}/{n}: {i} - batch loss: {batch_loss:.4f}")
+
+
     def log_metrics(engine, trainer, title):
         # gstep = trainer.state.gstep
         acc = engine.state.metrics['acc']
@@ -130,8 +140,8 @@ def run(r_pipe, w_pipe, barrier):
     if "pre-private" in cfg['stages']:
         barrier.wait()
         model.load_state_dict(torch.load(f"{wandb.run.dir}/init_public.pth"))
-        with trainer.add_event_handler(Events.EPOCH_COMPLETED,
-                                       evaluate, "private_init", private_dls):
+        with trainer.add_event_handler(Events.EPOCH_COMPLETED, evaluate,
+                                       "private_init", private_dls):
             gstep = 0
             trainer.state.max_epochs = None
             trainer.run(private_dl, cfg['private_init_epochs'])
@@ -160,15 +170,15 @@ def run(r_pipe, w_pipe, barrier):
             logits = r_pipe.recv()
             logit_dl = DataLoader(TensorDataset(alignment_data, logits),
                                 batch_size=cfg['logits_matching_batchsize'])
-            with trainer_logit.add_event_handler(Events.EPOCH_COMPLETED,
-                                                 evaluate, "alignment", private_dls):
+            with trainer_logit.add_event_handler(Events.EPOCH_COMPLETED, evaluate,
+                                                 "alignment", private_dls):
                 # trainer_logit.state.gstep = trainer.state.gstep
                 trainer_logit.state.max_epochs = None
                 trainer_logit.run(logit_dl, cfg['logits_matching_epochs'])
 
 
-        with trainer.add_event_handler(Events.EPOCH_COMPLETED,
-                                       evaluate, "private_training", private_dls):
+        with trainer.add_event_handler(Events.EPOCH_COMPLETED, evaluate,
+                                       "private_training", private_dls):
             # trainer.state.gstep = trainer_logit.state.gstep
             trainer.state.max_epochs = None
             trainer.run(private_dl, cfg['private_training_epochs'])
@@ -186,8 +196,8 @@ def run(r_pipe, w_pipe, barrier):
     if "upper" in cfg['stages']:
         barrier.wait()
         model.load_state_dict(torch.load(f"{wandb.run.dir}/init_public.pth"))
-        with trainer.add_event_handler(Events.EPOCH_COMPLETED,
-                                       evaluate, "upper", private_dls, add_stage=True):
+        with trainer.add_event_handler(Events.EPOCH_COMPLETED, evaluate,
+                                       "upper", private_dls, add_stage=True):
             gstep = 0
             trainer.state.max_epochs = None
             epochs = cfg['private_init_epochs'] + cfg['collab_rounds'] * cfg['private_training_epochs']
@@ -197,8 +207,8 @@ def run(r_pipe, w_pipe, barrier):
     if "lower" in cfg['stages']:
         barrier.wait()
         model.load_state_dict(torch.load(f"{wandb.run.dir}/init_private.pth"))
-        with trainer.add_event_handler(Events.EPOCH_COMPLETED,
-                                       evaluate, "lower", private_dls, add_stage=True):
+        with trainer.add_event_handler(Events.EPOCH_COMPLETED, evaluate,
+                                       "lower", private_dls, add_stage=True):
             gstep = 0
             trainer.state.max_epochs = None
             # epochs = cfg['collab_rounds'] * cfg['private_training_epochs']
