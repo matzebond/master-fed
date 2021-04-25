@@ -16,7 +16,6 @@ from pathlib import Path
 from time import sleep
 import logging
 
-import CIFAR
 import FedMD
 from data import load_idx_from_artifact, build_private_dls
 
@@ -270,6 +269,7 @@ def main():
                group=cfg['group'], job_type="master", id=cfg['main_id'],
                config=cfg, config_exclude_keys=['main_id', 'group', 'rank', 'model'])
 
+    import CIFAR
     private_partial_idxs = load_idx_from_artifact(
         np.array(CIFAR.private_train_data.targets),
         cfg['parties'],
