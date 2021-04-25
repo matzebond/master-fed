@@ -67,7 +67,8 @@ def run(r_pipe, w_pipe, barrier):
     )
     loss_metric = metrics.Loss(nn.CrossEntropyLoss())
     evaluator = create_supervised_evaluator(model, metrics={"acc": metrics.Accuracy(),
-                                                            "loss": loss_metric})
+                                                            "loss": loss_metric},
+                                            device=device)
 
     # @trainer.on(Events.ITERATION_COMPLETED)
     def log_training(engine):
@@ -120,8 +121,6 @@ def run(r_pipe, w_pipe, barrier):
                    "private_test": private_test_dl}
 
 
-
-
     if "pre-public" in cfg['stages']:
         barrier.wait()
         print(f"party {cfg['rank']}: start 'pre-public' stage")
@@ -164,7 +163,7 @@ def run(r_pipe, w_pipe, barrier):
         if cfg['alignment_mode'] != "none":
             alignment_data = r_pipe.recv()
             with torch.no_grad():
-                logits = model(alignment_data)
+                logits = model(alignment_data.to(device))
                 w_pipe.send(logits)
 
             logits = r_pipe.recv()
