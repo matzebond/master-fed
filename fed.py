@@ -3,8 +3,9 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, Subset, TensorDataset
 from torch.utils.tensorboard import SummaryWriter
-import multiprocessing as mp
-import multiprocessing.pool
+import torch.multiprocessing as mp
+from torch.multiprocessing import Pool
+# from multiprocessing.pool import Pool
 import ignite
 from ignite import metrics
 from ignite.engine import Engine, Events, create_supervised_trainer, create_supervised_evaluator
@@ -22,7 +23,7 @@ import FedMD
 from data import load_idx_from_artifact, build_private_dls
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-print("Using {} device".format(device))
+print(f"Using device: {device}")
 
 
 def log_training(engine):
@@ -61,7 +62,7 @@ class FedWorker:
         self.cfg['architecture'] = FedMD.FedMD_CIFAR_hyper[self.cfg['model']]
         self.model = FedMD.FedMD_CIFAR(10+len(cfg['subclasses']),
                                        (3, 32, 32),
-                                       *self.cfg['architecture']).to(device)
+                                       *self.cfg['architecture'])
 
         self.cfg['path'] = self.cfg['path'] / str(self.cfg['rank'])
 
@@ -78,27 +79,27 @@ class FedWorker:
 
 
     def setup(self, load_optimizer=False):
-        model = self.model.to(device)
+        self.model = self.model.to(device)
 
-        self.optimizer = torch.optim.Adam(model.parameters(),
+        self.optimizer = torch.optim.Adam(self.model.parameters(),
                                           lr=self.cfg['init_public_lr'])
         if load_optimizer:
-            optimizer.load_state_dict(self.optim_state)
+            self.optimizer.load_state_dict(self.optim_state)
 
         self.trainer = create_supervised_trainer(
-            model,
+            self.model,
             self.optimizer,
             nn.CrossEntropyLoss(),
             device,
         )
         self.trainer_logit = create_supervised_trainer(
-            model,
+            self.model,
             self.optimizer,
             nn.MSELoss(),  # TODO use KL Loss
             device,
         )
         self.evaluator = create_supervised_evaluator(
-            model,
+            self.model,
             {"acc": metrics.Accuracy(),
              "loss": metrics.Loss(nn.CrossEntropyLoss())},
             device)
@@ -112,8 +113,6 @@ class FedWorker:
 
         self.writer = SummaryWriter(self.cfg['path'])
 
-        return model
-
 
     def teardown(self, save_optimizer=False):
         if save_optimizer:
@@ -122,6 +121,8 @@ class FedWorker:
         del self.optimizer, self.trainer, self.trainer_logit, self.evaluator
         del self.private_dl, self.public_dls, self.private_dls
         del self.writer
+
+        self.model = self.model.cpu()
 
 
     def finish(self):
@@ -168,7 +169,7 @@ class FedWorker:
     def init_public(self):
         print(f"party {self.cfg['rank']}: start 'init_public' stage")
         self.gstep = 0
-        model = self.setup(self.optim_state)
+        self.setup()
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "init_public",
@@ -177,7 +178,7 @@ class FedWorker:
             self.trainer.state.max_epochs = None
             self.trainer.run(public_train_dl, self.cfg['init_public_epochs'])
 
-        torch.save(model.state_dict(), f"{self.cfg['path']}/init_public.pth")
+        torch.save(self.model.state_dict(), f"{self.cfg['path']}/init_public.pth")
 
         self.teardown()
 
@@ -187,14 +188,14 @@ class FedWorker:
         print(f"party {self.cfg['rank']}: start 'init_private' stage")
         self.model.load_state_dict(torch.load(f"{self.cfg['path']}/init_public.pth"))
         self.gstep = 0
-        model = self.setup(self.optim_state)
+        self.setup()
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "init_private", self.private_dls):
             self.trainer.state.max_epochs = None
             self.trainer.run(self.private_dl, self.cfg['init_private_epochs'])
 
-        torch.save(model.state_dict(), f"{self.cfg['path']}/init_private.pth")
+        torch.save(self.model.state_dict(), f"{self.cfg['path']}/init_private.pth")
 
         self.teardown()
 
@@ -203,7 +204,7 @@ class FedWorker:
     def upper_bound(self):
         self.model.load_state_dict(torch.load(f"{self.cfg['path']}/init_public.pth"))
         self.gstep = 0
-        model = self.setup()
+        self.setup()
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "upper", self.private_dls, add_stage=True):
@@ -219,7 +220,7 @@ class FedWorker:
     def lower_bound(self):
         self.model.load_state_dict(torch.load(f"{self.cfg['path']}/init_private.pth"))
         self.gstep = 0
-        model = self.setup()
+        self.setup()
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "lower", self.private_dls, add_stage=True):
@@ -233,7 +234,7 @@ class FedWorker:
     @self_dec
     def start_collab(self):
         self.model.load_state_dict(torch.load(f"{self.cfg['path']}/init_private.pth"))
-        model = self.setup()
+        self.setup()
         print(f"party {self.cfg['rank']}: start 'collab' stage")
 
         gstep = self.cfg['init_private_epochs']
@@ -244,12 +245,12 @@ class FedWorker:
 
     @self_dec
     def get_logits(self, alignment_data):
-        model = self.setup()
+        self.setup(self.optim_state)
         def logit_collect(engine, batch):
-            model.train()
+            self.model.train()
             x = batch[0].to(device)
             with torch.no_grad():
-                logits = model(x)
+                logits = self.model(x)
             if engine.state.iteration > 1:
                 engine.state.logits = torch.cat((engine.state.logits, logits))
             else:
@@ -266,7 +267,7 @@ class FedWorker:
 
     @self_dec
     def collab_round(self, allignment_data = None, logits = None):
-        model = self.setup(self.optim_state)
+        self.setup(self.optim_state)
 
         if allignment_data != None and logits != None:
             logit_dl = DataLoader(TensorDataset(alignment_data, logits),
@@ -285,7 +286,7 @@ class FedWorker:
             self.trainer.run(self.private_dl, self.cfg['private_training_epochs'])
         
         self.coarse_eval()
-        self.teardown()
+        self.teardown(save_optimizer=True)
 
 
     @self_dec
@@ -315,7 +316,7 @@ def main():
         'init_public_batch_size': 64,
         'init_private_epochs': 10,
         'init_private_batch_size': 32,
-        'collab_rounds': 1,
+        'collab_rounds': 10,
         'alignment_mode': 'public',
         'num_alignment': 2000,
         'logits_matching_epochs': 10,
@@ -360,12 +361,12 @@ def main():
     print("subclasses: ", subclass_names)
     print("all classes: ", combined_class_names)
 
-    with mp.pool.Pool(2, init_pool_process,
-                      [dill.dumps(private_partial_dls),
-                       dill.dumps(private_combined_dl),
-                       dill.dumps(private_test_dl),
-                       dill.dumps(public_train_dl),
-                       dill.dumps(public_test_dl)]) as pool:
+    with Pool(2, init_pool_process,
+              [dill.dumps(private_partial_dls),
+               dill.dumps(private_combined_dl),
+               dill.dumps(private_test_dl),
+               dill.dumps(public_train_dl),
+               dill.dumps(public_test_dl)]) as pool:
         args = []
         for i in range(cfg['parties']):
             p_cfg = cfg.copy()
