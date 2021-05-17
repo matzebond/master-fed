@@ -79,13 +79,13 @@ class FedWorker:
         self.optim_state = None
 
 
-    def setup(self, load_optimizer=False):
+    def setup(self, optimizer_state=None):
         self.model = self.model.to(device)
 
         self.optimizer = torch.optim.Adam(self.model.parameters(),
                                           lr=self.cfg['init_public_lr'])
-        if load_optimizer:
-            self.optimizer.load_state_dict(self.optim_state)
+        if optimizer_state != None:
+            self.optimizer.load_state_dict(optimizer_state)
             util.optim_to(self.optimizer, device)
 
         self.trainer = create_supervised_trainer(
@@ -173,6 +173,7 @@ class FedWorker:
             self.trainer.run(public_train_dl, self.cfg['init_public_epochs'])
 
         torch.save(self.model.state_dict(), f"{self.cfg['path']}/init_public.pth")
+        torch.save(self.optimizer.state_dict(), f"{self.cfg['path']}/init_public_optim.pth")
 
         self.teardown()
 
@@ -182,7 +183,7 @@ class FedWorker:
         print(f"party {self.cfg['rank']}: start 'init_private' stage")
         self.model.load_state_dict(torch.load(f"{self.cfg['path']}/init_public.pth"))
         self.gstep = 0
-        self.setup()
+        self.setup(torch.load(f"{self.cfg['path']}/init_public_optim.pth"))
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "init_private", self.private_dls):
@@ -190,6 +191,7 @@ class FedWorker:
             self.trainer.run(self.private_dl, self.cfg['init_private_epochs'])
 
         torch.save(self.model.state_dict(), f"{self.cfg['path']}/init_private.pth")
+        torch.save(self.optimizer.state_dict(), f"{self.cfg['path']}/init_private_optim.pth")
 
         self.teardown()
 
@@ -198,7 +200,7 @@ class FedWorker:
     def upper_bound(self):
         self.model.load_state_dict(torch.load(f"{self.cfg['path']}/init_public.pth"))
         self.gstep = 0
-        self.setup()
+        self.setup(torch.load(f"{self.cfg['path']}/init_public_optim.pth"))
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "upper", self.private_dls, add_stage=True):
@@ -214,7 +216,7 @@ class FedWorker:
     def lower_bound(self):
         self.model.load_state_dict(torch.load(f"{self.cfg['path']}/init_private.pth"))
         self.gstep = 0
-        self.setup()
+        self.setup(torch.load(f"{self.cfg['path']}/init_private_optim.pth"))
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "lower", self.private_dls, add_stage=True):
@@ -228,13 +230,13 @@ class FedWorker:
     @self_dec
     def start_collab(self):
         self.model.load_state_dict(torch.load(f"{self.cfg['path']}/init_private.pth"))
-        self.setup()
+        self.setup(torch.load(f"{self.cfg['path']}/init_private_optim.pth"))
         print(f"party {self.cfg['rank']}: start 'collab' stage")
 
         gstep = self.cfg['init_private_epochs']
         self.coarse_eval()
 
-        self.teardown()
+        self.teardown(save_optimizer=True)
 
 
     @self_dec
@@ -325,8 +327,9 @@ def main():
     model_mapping = list(repeat(4, cfg['parties']))
 
     wandb.init(project='mp-test', entity='maschm',
-               group=cfg['group'], job_type="master", name=cfg['group'],
-               config=cfg, config_exclude_keys=['group', 'rank', 'model'])
+               # group=cfg['group'], job_type="master", name=cfg['group'],
+               config=cfg, config_exclude_keys=['group', 'rank', 'model'],
+               sync_tensorboard=True)
 
     import CIFAR
     private_partial_idxs = load_idx_from_artifact(
@@ -366,8 +369,7 @@ def main():
             p_cfg = cfg.copy()
             p_cfg['rank'] = i
             p_cfg['model'] = model_mapping[i]
-            p_cfg['path'] = wandb.run.dir
-            p_cfg['path'] = Path("./current_run")
+            p_cfg['path'] = Path(wandb.run.dir)
             args.append((i,p_cfg));
 
         workers = pool.starmap(FedWorker, args)
