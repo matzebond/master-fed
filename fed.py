@@ -21,6 +21,7 @@ import functools
 
 import FedMD
 from data import load_idx_from_artifact, build_private_dls
+import util
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
@@ -85,6 +86,7 @@ class FedWorker:
                                           lr=self.cfg['init_public_lr'])
         if load_optimizer:
             self.optimizer.load_state_dict(self.optim_state)
+            util.optim_to(self.optimizer, device)
 
         self.trainer = create_supervised_trainer(
             self.model,
@@ -116,7 +118,7 @@ class FedWorker:
 
     def teardown(self, save_optimizer=False):
         if save_optimizer:
-            self.optim_state = self.optimizer.state_dict()
+            self.optim_state = util.optim_to(self.optimizer, "cpu").state_dict()
 
         del self.optimizer, self.trainer, self.trainer_logit, self.evaluator
         del self.private_dl, self.public_dls, self.private_dls
@@ -154,15 +156,7 @@ class FedWorker:
 
     def coarse_eval(self):
         self.gstep -= 1
-        self.evaluate(None, "coarse",
-                      {"private_test": private_test_dl},
-                      add_stage=True)
-        # with evaluator.add_event_handler(Events.COMPLETED,
-        #                                  self.log_metrics,
-        #                                  self.trainer, "coarse/private_test"):
-        #     evaluator.state.max_epochs = None
-        #     evaluator.run(private_test_dl)
-        #     self.gstep += 1
+        self.evaluate(None, "coarse", {"private_test": private_test_dl}, add_stage=True)
 
 
     @self_dec
@@ -245,7 +239,7 @@ class FedWorker:
 
     @self_dec
     def get_logits(self, alignment_data):
-        self.setup(self.optim_state)
+        self.setup()
         def logit_collect(engine, batch):
             self.model.train()
             x = batch[0].to(device)
@@ -262,7 +256,7 @@ class FedWorker:
         logit_collector.run(alignment_ds)
 
         self.teardown()
-        return logit_collector.state.logits
+        return logit_collector.state.logits.cpu()
 
 
     @self_dec

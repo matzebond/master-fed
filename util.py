@@ -1,3 +1,4 @@
+import torch
 import torchvision
 from torchvision import datasets, transforms
 from torchvision.transforms import ToTensor, Lambda, Compose
@@ -209,3 +210,11 @@ def load_model_artifact(stage, version="latest", logging=True):
 
             gstep[num] = 1
     return model_artifact
+
+
+def optim_to(optimizer, device):
+    for state in optimizer.state.values():
+        for k, v in state.items():
+            if torch.is_tensor(v):
+                state[k] = v.to(device)
+    return optimizer
