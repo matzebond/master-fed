@@ -3,8 +3,8 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, Subset, TensorDataset
 from torch.utils.tensorboard import SummaryWriter
-import torch.multiprocessing as mp
-from torch.multiprocessing import Barrier, Process, Pipe
+import multiprocessing as mp
+import multiprocessing.pool
 import ignite
 from ignite import metrics
 from ignite.engine import Engine, Events, create_supervised_trainer, create_supervised_evaluator
@@ -16,211 +16,289 @@ from pathlib import Path
 from time import sleep
 import logging
 
+import functools
+
 import FedMD
 from data import load_idx_from_artifact, build_private_dls
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print("Using {} device".format(device))
 
-def run(r_pipe, w_pipe, barrier):
-    cfg = r_pipe.recv()
 
-    private_dl = dill.loads(r_pipe.recv())
-    private_combined_dl = dill.loads(r_pipe.recv())
-    private_test_dl = dill.loads(r_pipe.recv())
-    public_train_dl = dill.loads(r_pipe.recv())
-    public_test_dl = dill.loads(r_pipe.recv())
-
-    np.random.seed()
-    torch.manual_seed(np.random.randint(0, 0xffff_ffff))
-
-    print(f"start run {cfg['rank']} in pid {os.getpid()}")
-
-    cfg['architecture'] = FedMD.FedMD_CIFAR_hyper[cfg['model']]
-    model = FedMD.FedMD_CIFAR(10+len(cfg['subclasses']),
-                              (3,32,32),
-                              *cfg['architecture']).to(device)
-
-    run = wandb.init(project='mp-test', entity='maschm',
-                     group=cfg['group'], job_type='party',
-                     config=cfg, config_exclude_keys=['main_id', 'group', 'rank'],
-                     sync_tensorboard=True)
-    writer = SummaryWriter(wandb.run.dir)
-    wandb.watch(model)
-
-    global gstep
-    gstep = 0
-
-    optimizer = torch.optim.Adam(model.parameters(), lr=cfg['public_lr'])
-
-    trainer = create_supervised_trainer(
-        model,
-        optimizer,
-        nn.CrossEntropyLoss(),
-        device,
-    )
-    trainer_logit = create_supervised_trainer(
-        model,
-        optimizer,
-        nn.MSELoss(), ## TODO use KL Loss
-        device,
-    )
-    loss_metric = metrics.Loss(nn.CrossEntropyLoss())
-    evaluator = create_supervised_evaluator(model, metrics={"acc": metrics.Accuracy(),
-                                                            "loss": loss_metric},
-                                            device=device)
-
-    # @trainer.on(Events.ITERATION_COMPLETED)
-    def log_training(engine):
-        batch_loss = engine.state.output
-        e = engine.state.epoch
-        n = engine.state.max_epochs
-        i = engine.state.iteration
-        print(f"Epoch {e}/{n}: {i} - batch loss: {batch_loss:.4f}")
+def log_training(engine):
+    batch_loss = engine.state.output
+    e = engine.state.epoch
+    n = engine.state.max_epochs
+    i = engine.state.iteration
+    print(f"Epoch {e}/{n}: {i} - batch loss: {batch_loss:.4f}")
 
 
-    def log_metrics(engine, trainer, title):
+def init_pool_process(partial_dls, combined_dl, test_dl, p_train_dl, p_test_dl):
+    global private_partial_dls, private_combined_dl, private_test_dl
+    private_partial_dls = dill.loads(partial_dls)
+    private_combined_dl = dill.loads(combined_dl)
+    private_test_dl = dill.loads(test_dl)
+    global public_train_dl, public_test_dl
+    public_train_dl = dill.loads(p_train_dl)
+    public_test_dl = dill.loads(p_test_dl)
+
+def self_dec(func):
+    @functools.wraps(func)
+    def inner(self, *args, **kwds):
+        ret = func(self, *args, **kwds) 
+        return self, ret
+    return inner
+
+class FedWorker:
+    def __init__(self, rank, cfg):
+        self.cfg = cfg
+
+        np.random.seed()
+        torch.manual_seed(np.random.randint(0, 0xffff_ffff))
+
+        print(f"start run {self.cfg['rank']} in pid {os.getpid()}")
+
+        self.cfg['architecture'] = FedMD.FedMD_CIFAR_hyper[self.cfg['model']]
+        self.model = FedMD.FedMD_CIFAR(10+len(cfg['subclasses']),
+                                       (3, 32, 32),
+                                       *self.cfg['architecture']).to(device)
+
+        self.cfg['path'] = self.cfg['path'] / str(self.cfg['rank'])
+
+        # w_run = wandb.init(project='mp-test', entity='maschm',
+        #                    group=self.cfg['group'], job_type='party',
+        #                    config=self.cfg,
+        #                    config_exclude_keys=['group', 'rank'],
+        #                    sync_tensorboard=True)
+        # wandb.watch(self.model)
+
+        self.gstep = 0
+
+        self.optim_state = None
+
+
+    def setup(self, load_optimizer=False):
+        model = self.model.to(device)
+
+        self.optimizer = torch.optim.Adam(model.parameters(),
+                                          lr=self.cfg['init_public_lr'])
+        if load_optimizer:
+            optimizer.load_state_dict(self.optim_state)
+
+        self.trainer = create_supervised_trainer(
+            model,
+            self.optimizer,
+            nn.CrossEntropyLoss(),
+            device,
+        )
+        self.trainer_logit = create_supervised_trainer(
+            model,
+            self.optimizer,
+            nn.MSELoss(),  # TODO use KL Loss
+            device,
+        )
+        self.evaluator = create_supervised_evaluator(
+            model,
+            {"acc": metrics.Accuracy(),
+             "loss": metrics.Loss(nn.CrossEntropyLoss())},
+            device)
+
+
+        self.private_dl = private_partial_dls[self.cfg['rank']]
+        self.public_dls  = {"public_train": public_train_dl,
+                            "public_test": public_test_dl}
+        self.private_dls = {"private_train": self.private_dl,
+                            "private_test": private_test_dl}
+
+        self.writer = SummaryWriter(self.cfg['path'])
+
+        return model
+
+
+    def teardown(self, save_optimizer=False):
+        if save_optimizer:
+            self.optim_state = self.optimizer.state_dict()
+
+        del self.optimizer, self.trainer, self.trainer_logit, self.evaluator
+        del self.private_dl, self.public_dls, self.private_dls
+        del self.writer
+
+
+    def finish(self):
+        pass
+
+
+    def log_metrics(self, engine, title):
         # gstep = trainer.state.gstep
         acc = engine.state.metrics['acc']
         loss = engine.state.metrics['loss']
-        print(f"{title} [{gstep:4}] - acc: {acc:.3f} loss: {loss:.4f}")
-        writer.add_scalar(f"{title}/acc", acc, gstep)
-        writer.add_scalar(f"{title}/loss", loss, gstep)
+        print(f"{title} [{self.gstep:4}] - acc: {acc:.3f} loss: {loss:.4f}")
+        self.writer.add_scalar(f"{title}/acc", acc, self.gstep)
+        self.writer.add_scalar(f"{title}/loss", loss, self.gstep)
 
 
-    def evaluate(trainer, stage="unknown", dls={}, add_stage=False, advance=True):
-        epoch = trainer.state.epoch
-        max_epochs = trainer.state.max_epochs
-        print(f"{stage} [{epoch:2d}/{max_epochs:2d}]")
+    def evaluate(self, trainer, stage, dls, add_stage=False, advance=True):
+        if trainer:
+            print(f"{stage} [{trainer.state.epoch:2d}/{trainer.state.max_epochs:2d}]")
+
         for name, dl in dls.items():
-            with evaluator.add_event_handler(Events.COMPLETED,
-                                             log_metrics, trainer,
-                                             f"{stage}/{name}" if add_stage else name):
-                evaluator.state.max_epochs = None
-                evaluator.run(dl)
-        global gstep
+            title = f"{stage}/{name}" if add_stage else name
+            with self.evaluator.add_event_handler(Events.COMPLETED,
+                                                  self.log_metrics, title):
+                self.evaluator.state.max_epochs = None
+                self.evaluator.run(dl)
         if advance:
-            gstep += 1
+            self.gstep += 1
 
 
-    def coarse_eval():
-        global gstep
-        gstep -= 1
-        # evaluate(trainer, "coarse",
-        #          {private_test_dl: "private_test"}, add_stage=True, advance=False)
-        with evaluator.add_event_handler(Events.COMPLETED,
-                                         log_metrics, trainer, "coarse/private_test"):
-            evaluator.state.max_epochs = None
-            evaluator.run(private_test_dl)
-        gstep += 1
+    def coarse_eval(self):
+        self.gstep -= 1
+        self.evaluate(None, "coarse",
+                      {"private_test": private_test_dl},
+                      add_stage=True)
+        # with evaluator.add_event_handler(Events.COMPLETED,
+        #                                  self.log_metrics,
+        #                                  self.trainer, "coarse/private_test"):
+        #     evaluator.state.max_epochs = None
+        #     evaluator.run(private_test_dl)
+        #     self.gstep += 1
 
 
-    public_dls  = {"public_train": public_train_dl,
-                   "public_test": public_test_dl}
-    private_dls = {"private_train": private_dl,
-                   "private_test": private_test_dl}
+    @self_dec
+    def init_public(self):
+        print(f"party {self.cfg['rank']}: start 'init_public' stage")
+        self.gstep = 0
+        model = self.setup(self.optim_state)
+
+        with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
+                                            "init_public",
+                                            self.public_dls,
+                                            add_stage=True):
+            self.trainer.state.max_epochs = None
+            self.trainer.run(public_train_dl, self.cfg['init_public_epochs'])
+
+        torch.save(model.state_dict(), f"{self.cfg['path']}/init_public.pth")
+
+        self.teardown()
 
 
-    if "pre-public" in cfg['stages']:
-        barrier.wait()
-        print(f"party {cfg['rank']}: start 'pre-public' stage")
-        with trainer.add_event_handler(Events.EPOCH_COMPLETED, evaluate,
-                                        "public_init", public_dls, add_stage=True):
-            gstep = 0
-            trainer.state.max_epochs = None
-            trainer.run(public_train_dl, cfg['public_epochs'])
+    @self_dec
+    def init_private(self):
+        print(f"party {self.cfg['rank']}: start 'init_private' stage")
+        self.model.load_state_dict(torch.load(f"{self.cfg['path']}/init_public.pth"))
+        self.gstep = 0
+        model = self.setup(self.optim_state)
 
-        torch.save(model.state_dict(), f"{wandb.run.dir}/init_public.pth")
-        # f"{wandb.run.dir}/init_public_{cfg['rank']}-{cfg['model']}.pth")
-    else:
-        model.load_state_dict(torch.load(path))
+        with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
+                                            "init_private", self.private_dls):
+            self.trainer.state.max_epochs = None
+            self.trainer.run(self.private_dl, self.cfg['init_private_epochs'])
 
+        torch.save(model.state_dict(), f"{self.cfg['path']}/init_private.pth")
 
-    if "pre-private" in cfg['stages']:
-        barrier.wait()
-        model.load_state_dict(torch.load(f"{wandb.run.dir}/init_public.pth"))
-        with trainer.add_event_handler(Events.EPOCH_COMPLETED, evaluate,
-                                       "private_init", private_dls):
-            gstep = 0
-            trainer.state.max_epochs = None
-            trainer.run(private_dl, cfg['private_init_epochs'])
-
-        torch.save(model.state_dict(), f"{wandb.run.dir}/init_private.pth")
+        self.teardown()
 
 
+    @self_dec
+    def upper_bound(self):
+        self.model.load_state_dict(torch.load(f"{self.cfg['path']}/init_public.pth"))
+        self.gstep = 0
+        model = self.setup()
 
-    if not "collab" in cfg['stages']:
-        return
-    else:
-        barrier.wait()
-        model.load_state_dict(torch.load(f"{wandb.run.dir}/init_private.pth"))
-        print(f"party {cfg['rank']}: start 'collab' stage")
+        with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
+                                            "upper", self.private_dls, add_stage=True):
+            self.trainer.state.max_epochs = None
+            epochs = self.cfg['init_private_epochs'] \
+                + self.cfg['collab_rounds'] * self.cfg['private_training_epochs']
+            self.trainer.run(private_combined_dl, epochs)
 
-    gstep = cfg['private_init_epochs']
-    coarse_eval()
-    for collab_idx in range(cfg['collab_rounds']):
-        barrier.wait()
-        if cfg['alignment_mode'] != "none":
-            alignment_data = r_pipe.recv()
+        self.teardown()
+
+
+    @self_dec
+    def lower_bound(self):
+        self.model.load_state_dict(torch.load(f"{self.cfg['path']}/init_private.pth"))
+        self.gstep = 0
+        model = self.setup()
+
+        with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
+                                            "lower", self.private_dls, add_stage=True):
+            self.trainer.state.max_epochs = None
+            epochs = self.cfg['collab_rounds'] * self.cfg['private_training_epochs']
+            self.trainer.run(self.private_dl, epochs)
+
+        self.teardown()
+
+
+    @self_dec
+    def start_collab(self):
+        self.model.load_state_dict(torch.load(f"{self.cfg['path']}/init_private.pth"))
+        model = self.setup()
+        print(f"party {self.cfg['rank']}: start 'collab' stage")
+
+        gstep = self.cfg['init_private_epochs']
+        self.coarse_eval()
+
+        self.teardown()
+
+
+    @self_dec
+    def get_logits(self, alignment_data):
+        model = self.setup()
+        def logit_collect(engine, batch):
+            model.train()
+            x = batch[0].to(device)
             with torch.no_grad():
-                logits = model(alignment_data.to(device))
-                w_pipe.send(logits)
+                logits = model(x)
+            if engine.state.iteration > 1:
+                engine.state.logits = torch.cat((engine.state.logits, logits))
+            else:
+                engine.state.logits = logits
 
-            logits = r_pipe.recv()
+        alignment_ds = DataLoader(TensorDataset(alignment_data),
+                                  batch_size=self.cfg['logits_matching_batchsize'])
+        logit_collector = Engine(logit_collect)
+        logit_collector.run(alignment_ds)
+
+        self.teardown()
+        return logit_collector.state.logits
+
+
+    @self_dec
+    def collab_round(self, allignment_data = None, logits = None):
+        model = self.setup(self.optim_state)
+
+        if allignment_data != None and logits != None:
             logit_dl = DataLoader(TensorDataset(alignment_data, logits),
-                                batch_size=cfg['logits_matching_batchsize'])
-            with trainer_logit.add_event_handler(Events.EPOCH_COMPLETED, evaluate,
-                                                 "alignment", private_dls):
+                                batch_size=self.cfg['logits_matching_batchsize'])
+            with self.trainer_logit.add_event_handler(Events.EPOCH_COMPLETED,
+                                                      self.evaluate,
+                                                      "alignment", self.private_dls):
                 # trainer_logit.state.gstep = trainer.state.gstep
-                trainer_logit.state.max_epochs = None
-                trainer_logit.run(logit_dl, cfg['logits_matching_epochs'])
+                self.trainer_logit.state.max_epochs = None
+                self.trainer_logit.run(logit_dl, self.cfg['logits_matching_epochs'])
 
-
-        with trainer.add_event_handler(Events.EPOCH_COMPLETED, evaluate,
-                                       "private_training", private_dls):
+        with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
+                                            "private_training", self.private_dls):
             # trainer.state.gstep = trainer_logit.state.gstep
-            trainer.state.max_epochs = None
-            trainer.run(private_dl, cfg['private_training_epochs'])
+            self.trainer.state.max_epochs = None
+            self.trainer.run(self.private_dl, self.cfg['private_training_epochs'])
+        
+        self.coarse_eval()
+        self.teardown()
 
 
-        if cfg['model_averaging']:
-            w_pipe.send(model.model.state_dict())
-            model.load_state_dict(r_pipe.recv())
+    @self_dec
+    def get_model_state(self):
+        return self.model.state_dict()
 
 
-        coarse_eval()
+    @self_dec
+    def set_model_state(self, state):
+        self.model.load_state_dict(state)
 
 
 
-    if "upper" in cfg['stages']:
-        barrier.wait()
-        model.load_state_dict(torch.load(f"{wandb.run.dir}/init_public.pth"))
-        with trainer.add_event_handler(Events.EPOCH_COMPLETED, evaluate,
-                                       "upper", private_dls, add_stage=True):
-            gstep = 0
-            trainer.state.max_epochs = None
-            epochs = cfg['private_init_epochs'] + cfg['collab_rounds'] * cfg['private_training_epochs']
-            trainer.run(private_combined_dl, epochs)
-
-
-    if "lower" in cfg['stages']:
-        barrier.wait()
-        model.load_state_dict(torch.load(f"{wandb.run.dir}/init_private.pth"))
-        with trainer.add_event_handler(Events.EPOCH_COMPLETED, evaluate,
-                                       "lower", private_dls, add_stage=True):
-            gstep = 0
-            trainer.state.max_epochs = None
-            # epochs = cfg['collab_rounds'] * cfg['private_training_epochs']
-            epochs = cfg['private_init_epochs'] + cfg['collab_rounds'] * cfg['private_training_epochs']
-            trainer.run(private_dl, epochs)
-
-
-    r_pipe.close()
-    w_pipe.close()
-    run.finish()
-
-
-    
 
 def main():
     cfg = {
@@ -232,12 +310,12 @@ def main():
         'parties': 10,
         'load_private_idx': True,
         'optim': 'Adam',
-        'public_lr': 0.001,
-        'public_epochs': 10,
-        'public_batch_size': 64,
-        'private_init_epochs': 10,
-        'private_init_batch_size': 32,
-        'collab_rounds': 10,
+        'init_public_lr': 0.001,
+        'init_public_epochs': 10,
+        'init_public_batch_size': 64,
+        'init_private_epochs': 10,
+        'init_private_batch_size': 32,
+        'collab_rounds': 1,
         'alignment_mode': 'public',
         'num_alignment': 2000,
         'logits_matching_epochs': 10,
@@ -245,37 +323,15 @@ def main():
         'private_training_epochs': 1,
         # 'private_training_batchsize': 5, # TODO not supported
         'model_averaging': False,
-        'stages': ['pre-public', 'pre-private', 'init-private', 'collab', 'lower', 'upper'],
+        'stages': ['init_public', 'init_private', 'collab', 'lower', 'upper'],
     }
 
-    model_mapping =  list(islice(cycle(range(len(FedMD.FedMD_CIFAR_hyper))), cfg['parties']))
-    # model_mapping = list(repeat(4, cfg['parties']))
-
-
-    processes = []
-    pipes = []
-    barrier = Barrier(cfg['parties']+1)
-
-    for i in range(cfg['parties']):
-        p_cfg = cfg.copy()
-        p_cfg['rank'] = i
-        p_cfg['model'] = model_mapping[i]
-
-        p_recv, m_send = Pipe(duplex=False)
-        m_recv, p_send = Pipe(duplex=False)
-        p = Process(target=run, args=(p_recv, p_send, barrier))
-        p.start()
-
-        m_send.send(p_cfg)
-
-        p_recv.close()
-        p_send.close()
-        processes.append(p)
-        pipes.append((m_recv, m_send))
+    # model_mapping =  list(islice(cycle(range(len(FedMD.FedMD_CIFAR_hyper))), cfg['parties']))
+    model_mapping = list(repeat(4, cfg['parties']))
 
     wandb.init(project='mp-test', entity='maschm',
                group=cfg['group'], job_type="master", name=cfg['group'],
-               config=cfg, config_exclude_keys=['main_id', 'group', 'rank', 'model'])
+               config=cfg, config_exclude_keys=['group', 'rank', 'model'])
 
     import CIFAR
     private_partial_idxs = load_idx_from_artifact(
@@ -290,12 +346,12 @@ def main():
         10,
         cfg['subclasses'],
         private_partial_idxs,
-        cfg['private_init_batch_size']
+        cfg['init_private_batch_size']
     )
     public_train_dl = DataLoader(CIFAR.public_train_data,
-                                 batch_size=cfg['public_batch_size'])
+                                 batch_size=cfg['init_public_batch_size'])
     public_test_dl = DataLoader(CIFAR.public_test_data,
-                                batch_size=cfg['public_batch_size'])
+                                batch_size=cfg['init_public_batch_size'])
 
     print(f"train {cfg['parties']} models on")
     subclass_names = list(map(lambda x: CIFAR.private_train_data.classes[x],
@@ -304,73 +360,85 @@ def main():
     print("subclasses: ", subclass_names)
     print("all classes: ", combined_class_names)
 
+    with mp.pool.Pool(2, init_pool_process,
+                      [dill.dumps(private_partial_dls),
+                       dill.dumps(private_combined_dl),
+                       dill.dumps(private_test_dl),
+                       dill.dumps(public_train_dl),
+                       dill.dumps(public_test_dl)]) as pool:
+        args = []
+        for i in range(cfg['parties']):
+            p_cfg = cfg.copy()
+            p_cfg['rank'] = i
+            p_cfg['model'] = model_mapping[i]
+            p_cfg['path'] = wandb.run.dir
+            p_cfg['path'] = Path("./current_run")
+            args.append((i,p_cfg));
 
-    for _, send in pipes:
-        send.send(dill.dumps(private_partial_dls[i]))
-        send.send(dill.dumps(private_combined_dl))
-        send.send(dill.dumps(private_test_dl))
-        send.send(dill.dumps(public_train_dl))
-        send.send(dill.dumps(public_test_dl))
+        workers = pool.starmap(FedWorker, args)
 
+        if "init_public" in cfg['stages']:
+            print(f"All parties starting with 'pre-public'")
+            res = pool.map(FedWorker.init_public, workers)
+            [workers, res] = list(zip(*res))
 
-    if "pre-public" in cfg['stages']:
-        barrier.wait()
-        print(f"All parties started with 'pre-public'")
-    if "pre-private" in cfg['stages']:
-        barrier.wait()
-        print(f"All parties started with 'pre-private'")
-    if not "collab" in cfg['stages']:
-        return
+        if "init_private" in cfg['stages']:
+            print(f"All parties starting with 'pre-private'")
+            res = pool.map(FedWorker.init_private, workers)
+            [workers, res] = list(zip(*res))
 
-    barrier.wait()
+        if "collab" in cfg['stages']:
+            print(f"All parties starting with 'collab'")
+            res = pool.map(FedWorker.start_collab, workers)
+            [workers, res] = list(zip(*res))
+        else:
+            return
 
-    for n in range(cfg['collab_rounds']):
-        barrier.wait()
+        for n in range(cfg['collab_rounds']):
+            alingment_data, avg_logits = None, None
+            if cfg['alignment_mode'] != "none":
+                if cfg['alignment_mode'] == "public":
+                    print(f"Alignment Data: {cfg['num_alignment']} random examples from the public dataset")
+                    alignment_idx = np.random.choice(len(CIFAR.public_train_data),
+                                                     cfg['num_alignment'],
+                                                     replace = False)
+                    alignment_dl = DataLoader(Subset(CIFAR.public_train_data,
+                                                     alignment_idx),
+                                              batch_size=cfg['num_alignment'])
+                    alignment_data, alignment_labels = next(iter(alignment_dl))
+                elif cfg['alignment_mode'] == "random":
+                    print(f"Alignment Data: {cfg['num_alignment']} random noise inputs")
+                    alignment_data = torch.rand([cfg['num_alignment']]
+                                                + list(private_train_data[0][0].shape))
+                else:
+                    raise NotImplementedError(f"alignment_mode '{cfg['alignment_mode']}' is unknown")
 
-        if cfg['alignment_mode'] != "none":
-            # select alingment data
-            if cfg['alignment_mode'] == "public":
-                print(f"Alignment Data: {cfg['num_alignment']} random examples from the public dataset")
-                alignment_idx = np.random.choice(len(CIFAR.public_train_data),
-                                                 cfg['num_alignment'], replace = False)
-                alignment_dataset = DataLoader(Subset(CIFAR.public_train_data, alignment_idx),
-                                               batch_size=cfg['num_alignment'])
-                alignment_data, alignment_labels = next(iter(alignment_dataset))
-            elif cfg['alignment_mode'] == "random":
-                print(f"Alignment Data: {cfg['num_alignment']} random noise inputs")
-                alignment_data = torch.rand([cfg['num_alignment']]
-                                            + list(private_train_data[0][0].shape))
-            else:
-                raise NotImplementedError(f"alignment_mode '{cfg['alignment_mode']}' is unknown")
+                res = pool.starmap(FedWorker.get_logits,
+                                   zip(workers, repeat(alignment_data)))
+                [workers, logits] = list(zip(*res))
 
-            for _, send in pipes:
-                send.send(alignment_data)
+                avg_logits = torch.zeros_like(logits[0])
+                for l in logits:
+                    avg_logits += l
+                avg_logits /= len(logits)
 
-            logits = 0
-            for i,(recv,_) in enumerate(pipes):
-                logits += recv.recv()
-            logits /= cfg['parties']
+            res = pool.starmap(FedWorker.collab_round,
+                                zip(workers, repeat(avg_logits)))
+            [workers, _] = list(zip(*res))
 
-            for _, send in pipes:
-                send.send(logits)
+            if cfg['model_averaging']:
+                pass
 
-            print(f"main: done with alignment for round {n}")
+        if "upper" in cfg['stages']:
+            print(f"All parties starting with 'upper'")
+            res = pool.map(FedWorker.upper_bound, workers)
+            [workers, _] = list(zip(*res))
 
+        if "lower" in cfg['stages']:
+            print(f"All parties starting with 'lower'")
+            res = pool.map(FedWorker.lower_bound, workers)
+            [workers, _] = list(zip(*res))
 
-        if cfg['model_averaging']:
-            pass
-
-
-    if "upper" in cfg['stages']:
-        barrier.wait()
-        print(f"All parties started with 'upper'")
-    if "lower" in cfg['stages']:
-        barrier.wait()
-        print(f"All parties started with 'lower'")
-
-
-    for p in processes:
-        p.join()
     wandb.finish()
 
 

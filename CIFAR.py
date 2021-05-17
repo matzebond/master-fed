@@ -13,7 +13,6 @@ public_train_data = datasets.CIFAR10(
 public_test_data = datasets.CIFAR10(
     root="data",
     train=False,
-    download=True,
     transform=ToTensor(),
 )
 
@@ -27,7 +26,6 @@ private_train_data = datasets.CIFAR100(
 private_test_data = datasets.CIFAR100(
     root="data",
     train=False,
-    download=True,
     transform=ToTensor(),
 )
 
