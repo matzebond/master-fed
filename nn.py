@@ -1,50 +1,12 @@
 import torch
-from typing import List
+from torch import Tensor
+import torch.nn as nn
+import torch.nn.functional as F
+from torch.overrides import (
+    has_torch_function, has_torch_function_unary, has_torch_function_variadic,
+    handle_torch_function)
 
-def train(dataloader, model, loss_fn, optimizer, count_correct=True, verbose=True):
-    model.train()
-    size = len(dataloader.dataset)
-    train_loss, correct = 0, 0
-    for batch, (X, y) in enumerate(dataloader):
-        X, y = X.to(device), y.to(device)
-        
-        # Compute prediction error
-        pred = model(X)
-        loss = loss_fn(pred, y)
-        
-        # Compute training statistics
-        train_loss += loss.item()
-        if count_correct:
-            correct += (pred.argmax(1) == y).type(torch.float).sum().item()
-        
-        # Backpropagation
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
-
-        if batch % 100 == 0 and verbose:
-            loss, current = loss.item(), batch * len(X)
-            print(f"loss: {loss:>7f}  [{current:>5d}/{size:>5d}]")
-    train_loss /= size
-    correct /= size
-    return train_loss, correct
-
-
-def test(dataloader, model, loss_fn):
-    size = len(dataloader.dataset)
-    model.eval()
-    test_loss, correct = 0, 0
-    with torch.no_grad():
-        for X, y in dataloader:
-            X, y = X.to(device), y.to(device)
-            pred = model(X)
-            test_loss += loss_fn(pred, y).item()
-            correct += (pred.argmax(1) == y).type(torch.float).sum().item()
-    test_loss /= size
-    correct /= size
-    #print(f"Test Error: \n Accuracy: {(100*correct):>0.1f}%, Avg loss: {test_loss:>8f}")
-    return test_loss, correct
-
+from typing import List, Callable, Optional
 
 def avg_params(models: List[nn.Module]) -> None:
     params = []
@@ -70,35 +32,60 @@ def reset_all_parameters(model):
     if callable(reset_parameters):
         model.reset_parameters()
     else:
-        
+        pass
 
-# from torch.nn import _WeightedLoss
 
-# class _Loss(Module):
-#     reduction: str
+class KLDivSoftmaxLoss(nn.modules.loss._WeightedLoss):
+    __constants__ = ['reduction']
 
-#     def __init__(self, size_average=None, reduce=None, reduction: str = 'mean') -> None:
-#         super(_Loss, self).__init__()
-#         if size_average is not None or reduce is not None:
-#             self.reduction = _Reduction.legacy_get_string(size_average, reduce)
+    def __init__(self, size_average=None, reduce=None, reduction: str = 'mean', log_target: bool = False) -> None:
+        super(KLDivSoftmaxLoss, self).__init__(size_average, reduce, reduction)
+        self.log_target = log_target
+
+    def forward(self, input: Tensor, target: Tensor) -> Tensor:
+        return F.kl_div(F.softmax(input), target,
+                        reduction=self.reduction, log_target=self.log_target)
+
+
+# def kl_div_softmax(
+#     input: Tensor,
+#     target: Tensor,
+#     size_average: Optional[bool] = None,
+#     reduce: Optional[bool] = None,
+#     reduction: str = "mean",
+#     log_target: bool = False,
+# ) -> Tensor:
+#     if has_torch_function_variadic(input, target):
+#         input = F.softmax(input)
+#         return handle_torch_function(
+#             kl_div,
+#             (input, target),
+#             input,
+#             target,
+#             size_average=size_average,
+#             reduce=reduce,
+#             reduction=reduction,
+#             log_target=log_target,
+#         )
+#     if size_average is not None or reduce is not None:
+#         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
+#     else:
+#         if reduction == "mean":
+#             warnings.warn(
+#                 "reduction: 'mean' divides the total loss by both the batch size and the support size."
+#                 "'batchmean' divides only by the batch size, and aligns with the KL div math definition."
+#                 "'mean' will be changed to behave the same as 'batchmean' in the next major release."
+#             )
+
+#         # special case for batchmean
+#         if reduction == "batchmean":
+#             reduction_enum = _Reduction.get_enum("sum")
 #         else:
-#             self.reduction = reduction
+#             reduction_enum = _Reduction.get_enum(reduction)
 
+#     reduced = torch.kl_div(F.softmax(input), target, reduction_enum, log_target=log_target)
 
-# class _WeightedLoss(_Loss):
-#     def __init__(self, weight: Optional[Tensor] = None, size_average=None, reduce=None, reduction: str = 'mean') -> None:
-#         super(_WeightedLoss, self).__init__(size_average, reduce, reduction)
-#         self.register_buffer('weight', weight)
+#     if reduction == "batchmean" and input.dim() != 0:
+#         reduced = reduced / input.size()[0]
 
-
-
-# class CrossEntropyLoss(_WeightedLoss):
-#     def __init__(self, weight: Optional[Tensor] = None, size_average=None, ignore_index: int = -100,
-#                  reduce=None, reduction: str = 'mean') -> None:
-#         super(CrossEntropyLoss, self).__init__(weight, size_average, reduce, reduction)
-#         self.ignore_index = ignore_index
-
-#     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-#         assert self.weight is None or isinstance(self.weight, Tensor)
-#         return F.cross_entropy(input, target, weight=self.weight,
-#                                ignore_index=self.ignore_index, reduction=self.reduction)
+#     return reduced

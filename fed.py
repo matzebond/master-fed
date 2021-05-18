@@ -22,6 +22,7 @@ import functools
 import FedMD
 from data import load_idx_from_artifact, build_private_dls
 import util
+from nn import KLDivSoftmaxLoss
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
@@ -97,6 +98,7 @@ class FedWorker:
         self.trainer_logit = create_supervised_trainer(
             self.model,
             self.optimizer,
+            # KLDivSoftmaxLoss(),
             # nn.MSELoss(),
             nn.L1Loss(),
             device,
