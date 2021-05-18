@@ -367,7 +367,7 @@ def main():
     print("subclasses: ", subclass_names)
     print("all classes: ", combined_class_names)
 
-    with Pool(2, init_pool_process,
+    with Pool(4, init_pool_process,
               [dill.dumps(private_partial_dls),
                dill.dumps(private_combined_dl),
                dill.dumps(private_test_dl),
@@ -384,19 +384,27 @@ def main():
         workers = pool.starmap(FedWorker, args)
 
         if "init_public" in cfg['stages']:
-            print(f"All parties starting with 'pre-public'")
+            print(f"All parties starting with 'init_public'")
             res = pool.map(FedWorker.init_public, workers)
             [workers, res] = list(zip(*res))
+            [acc, loss] = list(zip(*res))
+            wandb.run.summary["init_public/acc"] = np.average(acc)
+            wandb.run.summary["init_public/loss"] = np.average(loss)
 
         if "init_private" in cfg['stages']:
-            print(f"All parties starting with 'pre-private'")
+            print(f"All parties starting with 'init_private'")
             res = pool.map(FedWorker.init_private, workers)
             [workers, res] = list(zip(*res))
+            [acc, loss] = list(zip(*res))
+            wandb.run.summary["init_private/acc"] = np.average(acc)
+            wandb.run.summary["init_private/loss"] = np.average(loss)
 
         if "collab" in cfg['stages']:
             print(f"All parties starting with 'collab'")
             res = pool.map(FedWorker.start_collab, workers)
             [workers, res] = list(zip(*res))
+            [acc, loss] = list(zip(*res))
+            wandb.log({"acc": np.average(acc), "loss": np.average(loss)})
         else:
             return
 
@@ -431,6 +439,8 @@ def main():
             res = pool.starmap(FedWorker.collab_round,
                                 zip(workers, repeat(alignment_data), repeat(avg_logits)))
             [workers, res] = list(zip(*res))
+            [acc, loss] = list(zip(*res))
+            wandb.log({"acc": np.average(acc), "loss": np.average(loss)})
 
             if cfg['model_averaging']:
                 pass
@@ -439,11 +449,17 @@ def main():
             print(f"All parties starting with 'upper'")
             res = pool.map(FedWorker.upper_bound, workers)
             [workers, res] = list(zip(*res))
+            [acc, loss] = list(zip(*res))
+            wandb.run.summary["upper/acc"] = np.average(acc)
+            wandb.run.summary["upper/loss"] = np.average(loss)
 
         if "lower" in cfg['stages']:
             print(f"All parties starting with 'lower'")
             res = pool.map(FedWorker.lower_bound, workers)
             [workers, res] = list(zip(*res))
+            [acc, loss] = list(zip(*res))
+            wandb.run.summary["lower/acc"] = np.average(acc)
+            wandb.run.summary["lower/loss"] = np.average(loss)
 
     wandb.finish()
 
