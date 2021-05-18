@@ -178,7 +178,9 @@ class FedWorker:
         torch.save(self.model.state_dict(), f"{self.cfg['path']}/init_public.pth")
         torch.save(self.optimizer.state_dict(), f"{self.cfg['path']}/init_public_optim.pth")
 
-        res = self.evaluator.state.metrics['acc'], self.evaluator.state.metrics['loss']
+        res = 0, 0
+        if self.cfg['init_public_epochs'] > 0:
+            res = self.evaluator.state.metrics['acc'], self.evaluator.state.metrics['loss']
         self.teardown()
         return res
 
@@ -338,30 +340,30 @@ def main():
                config=cfg, config_exclude_keys=['group', 'rank', 'model'],
                sync_tensorboard=True)
 
-    import CIFAR
+    import CIFAR as Data
     private_partial_idxs = load_idx_from_artifact(
-        np.array(CIFAR.private_train_data.targets),
+        np.array(Data.private_train_data.targets),
         cfg['parties'],
         cfg['subclasses'],
         cfg['samples_per_class']
     )
     private_partial_dls, private_combined_dl, private_test_dl = build_private_dls(
-        CIFAR.private_train_data,
-        CIFAR.private_test_data,
+        Data.private_train_data,
+        Data.private_test_data,
         10,
         cfg['subclasses'],
         private_partial_idxs,
         cfg['init_private_batch_size']
     )
-    public_train_dl = DataLoader(CIFAR.public_train_data,
+    public_train_dl = DataLoader(Data.public_train_data,
                                  batch_size=cfg['init_public_batch_size'])
-    public_test_dl = DataLoader(CIFAR.public_test_data,
+    public_test_dl = DataLoader(Data.public_test_data,
                                 batch_size=cfg['init_public_batch_size'])
 
     print(f"train {cfg['parties']} models on")
-    subclass_names = list(map(lambda x: CIFAR.private_train_data.classes[x],
+    subclass_names = list(map(lambda x: Data.private_train_data.classes[x],
                               cfg['subclasses']))
-    combined_class_names = CIFAR.public_train_data.classes + subclass_names
+    combined_class_names = Data.public_train_data.classes + subclass_names
     print("subclasses: ", subclass_names)
     print("all classes: ", combined_class_names)
 
@@ -403,10 +405,10 @@ def main():
             if cfg['alignment_mode'] != "none":
                 if cfg['alignment_mode'] == "public":
                     print(f"Alignment Data: {cfg['num_alignment']} random examples from the public dataset")
-                    alignment_idx = np.random.choice(len(CIFAR.public_train_data),
+                    alignment_idx = np.random.choice(len(Data.public_train_data),
                                                      cfg['num_alignment'],
                                                      replace = False)
-                    alignment_dl = DataLoader(Subset(CIFAR.public_train_data,
+                    alignment_dl = DataLoader(Subset(Data.public_train_data,
                                                      alignment_idx),
                                               batch_size=cfg['num_alignment'])
                     alignment_data, alignment_labels = next(iter(alignment_dl))
