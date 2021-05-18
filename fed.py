@@ -97,7 +97,8 @@ class FedWorker:
         self.trainer_logit = create_supervised_trainer(
             self.model,
             self.optimizer,
-            nn.MSELoss(),  # TODO use KL Loss
+            # nn.MSELoss(),
+            nn.L1Loss(),
             device,
         )
         self.evaluator = create_supervised_evaluator(
@@ -148,15 +149,16 @@ class FedWorker:
             title = f"{stage}/{name}" if add_stage else name
             with self.evaluator.add_event_handler(Events.COMPLETED,
                                                   self.log_metrics, title):
-                self.evaluator.state.max_epochs = None
                 self.evaluator.run(dl)
         if advance:
             self.gstep += 1
 
+        return self.evaluator.state.metrics['acc'], self.evaluator.state.metrics['loss']
 
-    def coarse_eval(self):
+
+    def coarse_eval(self, dls):
         self.gstep -= 1
-        self.evaluate(None, "coarse", {"private_test": private_test_dl}, add_stage=True)
+        return self.evaluate(None, "coarse", dls, add_stage=True)
 
 
     @self_dec
@@ -169,13 +171,14 @@ class FedWorker:
                                             "init_public",
                                             self.public_dls,
                                             add_stage=True):
-            self.trainer.state.max_epochs = None
             self.trainer.run(public_train_dl, self.cfg['init_public_epochs'])
 
         torch.save(self.model.state_dict(), f"{self.cfg['path']}/init_public.pth")
         torch.save(self.optimizer.state_dict(), f"{self.cfg['path']}/init_public_optim.pth")
 
+        res = self.evaluator.state.metrics['acc'], self.evaluator.state.metrics['loss']
         self.teardown()
+        return res
 
 
     @self_dec
@@ -187,13 +190,14 @@ class FedWorker:
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "init_private", self.private_dls):
-            self.trainer.state.max_epochs = None
             self.trainer.run(self.private_dl, self.cfg['init_private_epochs'])
 
         torch.save(self.model.state_dict(), f"{self.cfg['path']}/init_private.pth")
         torch.save(self.optimizer.state_dict(), f"{self.cfg['path']}/init_private_optim.pth")
 
+        res = self.evaluator.state.metrics['acc'], self.evaluator.state.metrics['loss']
         self.teardown()
+        return res
 
 
     @self_dec
@@ -204,12 +208,13 @@ class FedWorker:
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "upper", self.private_dls, add_stage=True):
-            self.trainer.state.max_epochs = None
             epochs = self.cfg['init_private_epochs'] \
                 + self.cfg['collab_rounds'] * self.cfg['private_training_epochs']
             self.trainer.run(private_combined_dl, epochs)
 
+        res = self.evaluator.state.metrics['acc'], self.evaluator.state.metrics['loss']
         self.teardown()
+        return res
 
 
     @self_dec
@@ -220,11 +225,12 @@ class FedWorker:
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "lower", self.private_dls, add_stage=True):
-            self.trainer.state.max_epochs = None
             epochs = self.cfg['collab_rounds'] * self.cfg['private_training_epochs']
             self.trainer.run(self.private_dl, epochs)
 
+        res = self.evaluator.state.metrics['acc'], self.evaluator.state.metrics['loss']
         self.teardown()
+        return res
 
 
     @self_dec
@@ -234,9 +240,10 @@ class FedWorker:
         print(f"party {self.cfg['rank']}: start 'collab' stage")
 
         gstep = self.cfg['init_private_epochs']
-        self.coarse_eval()
+        res = self.coarse_eval(self.private_dls)
 
         self.teardown(save_optimizer=True)
+        return res
 
 
     @self_dec
@@ -262,27 +269,25 @@ class FedWorker:
 
 
     @self_dec
-    def collab_round(self, allignment_data = None, logits = None):
+    def collab_round(self, alignment_data = None, logits = None):
         self.setup(self.optim_state)
 
-        if allignment_data != None and logits != None:
+        if alignment_data != None and logits != None:
             logit_dl = DataLoader(TensorDataset(alignment_data, logits),
                                 batch_size=self.cfg['logits_matching_batchsize'])
             with self.trainer_logit.add_event_handler(Events.EPOCH_COMPLETED,
                                                       self.evaluate,
                                                       "alignment", self.private_dls):
-                # trainer_logit.state.gstep = trainer.state.gstep
-                self.trainer_logit.state.max_epochs = None
                 self.trainer_logit.run(logit_dl, self.cfg['logits_matching_epochs'])
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "private_training", self.private_dls):
-            # trainer.state.gstep = trainer_logit.state.gstep
-            self.trainer.state.max_epochs = None
             self.trainer.run(self.private_dl, self.cfg['private_training_epochs'])
         
-        self.coarse_eval()
+        res = self.coarse_eval(self.private_dls)
+
         self.teardown(save_optimizer=True)
+        return res
 
 
     @self_dec
@@ -308,23 +313,23 @@ def main():
         'load_private_idx': True,
         'optim': 'Adam',
         'init_public_lr': 0.001,
-        'init_public_epochs': 10,
-        'init_public_batch_size': 64,
-        'init_private_epochs': 10,
+        'init_public_epochs': 20,
+        'init_public_batch_size': 128,
+        'init_private_epochs': 25,
         'init_private_batch_size': 32,
-        'collab_rounds': 10,
+        'collab_rounds': 20,
         'alignment_mode': 'public',
-        'num_alignment': 2000,
-        'logits_matching_epochs': 10,
-        'logits_matching_batchsize': 128,
-        'private_training_epochs': 1,
+        'num_alignment': 5000,
+        'logits_matching_epochs': 1,
+        'logits_matching_batchsize': 256,
+        'private_training_epochs': 4,
         # 'private_training_batchsize': 5, # TODO not supported
         'model_averaging': False,
         'stages': ['init_public', 'init_private', 'collab', 'lower', 'upper'],
     }
 
-    # model_mapping =  list(islice(cycle(range(len(FedMD.FedMD_CIFAR_hyper))), cfg['parties']))
-    model_mapping = list(repeat(4, cfg['parties']))
+    cfg['model_mapping'] =  list(islice(cycle(range(len(FedMD.FedMD_CIFAR_hyper))), cfg['parties']))
+    # cfg['model_mapping'] = list(repeat(4, cfg['parties']))
 
     wandb.init(project='mp-test', entity='maschm',
                # group=cfg['group'], job_type="master", name=cfg['group'],
@@ -368,7 +373,7 @@ def main():
         for i in range(cfg['parties']):
             p_cfg = cfg.copy()
             p_cfg['rank'] = i
-            p_cfg['model'] = model_mapping[i]
+            p_cfg['model'] = cfg['model_mapping'][i]
             p_cfg['path'] = Path(wandb.run.dir)
             args.append((i,p_cfg));
 
@@ -420,8 +425,8 @@ def main():
                 avg_logits /= len(logits)
 
             res = pool.starmap(FedWorker.collab_round,
-                                zip(workers, repeat(avg_logits)))
-            [workers, _] = list(zip(*res))
+                                zip(workers, repeat(alignment_data), repeat(avg_logits)))
+            [workers, res] = list(zip(*res))
 
             if cfg['model_averaging']:
                 pass
@@ -429,12 +434,12 @@ def main():
         if "upper" in cfg['stages']:
             print(f"All parties starting with 'upper'")
             res = pool.map(FedWorker.upper_bound, workers)
-            [workers, _] = list(zip(*res))
+            [workers, res] = list(zip(*res))
 
         if "lower" in cfg['stages']:
             print(f"All parties starting with 'lower'")
             res = pool.map(FedWorker.lower_bound, workers)
-            [workers, _] = list(zip(*res))
+            [workers, res] = list(zip(*res))
 
     wandb.finish()
 
