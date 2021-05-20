@@ -1,3 +1,11 @@
+import functools
+import os
+import logging
+from itertools import repeat
+from pathlib import Path
+
+import dill
+import wandb
 import numpy as np
 import torch
 from torch import nn
@@ -9,15 +17,6 @@ from torch.multiprocessing import Pool
 import ignite
 from ignite import metrics
 from ignite.engine import Engine, Events, create_supervised_trainer, create_supervised_evaluator
-import wandb
-from itertools import *
-import dill
-import os
-from pathlib import Path
-from time import sleep
-import logging
-
-import functools
 
 import FedMD
 from data import load_idx_from_artifact, build_private_dls
@@ -45,12 +44,14 @@ def init_pool_process(partial_dls, combined_dl, test_dl, p_train_dl, p_test_dl):
     public_train_dl = dill.loads(p_train_dl)
     public_test_dl = dill.loads(p_test_dl)
 
+
 def self_dec(func):
     @functools.wraps(func)
     def inner(self, *args, **kwds):
-        ret = func(self, *args, **kwds) 
+        ret = func(self, *args, **kwds)
         return self, ret
     return inner
+
 
 class FedWorker:
     def __init__(self, rank, cfg):
@@ -70,8 +71,7 @@ class FedWorker:
 
         # w_run = wandb.init(project='mp-test', entity='maschm',
         #                    group=self.cfg['group'], job_type='party',
-        #                    config=self.cfg,
-        #                    config_exclude_keys=['group', 'rank'],
+        #                    config=self.cfg, config_exclude_keys=cfg['ignore'],
         #                    sync_tensorboard=True)
         # wandb.watch(self.model)
 
@@ -85,7 +85,7 @@ class FedWorker:
 
         self.optimizer = torch.optim.Adam(self.model.parameters(),
                                           lr=self.cfg['init_public_lr'])
-        if optimizer_state != None:
+        if optimizer_state is not None:
             self.optimizer.load_state_dict(optimizer_state)
             util.optim_to(self.optimizer, device)
 
@@ -278,7 +278,7 @@ class FedWorker:
 
         if alignment_data != None and logits != None:
             logit_dl = DataLoader(TensorDataset(alignment_data, logits),
-                                batch_size=self.cfg['logits_matching_batchsize'])
+                                  batch_size=self.cfg['logits_matching_batchsize'])
             with self.trainer_logit.add_event_handler(Events.EPOCH_COMPLETED,
                                                       self.evaluate,
                                                       "alignment", self.private_dls):
@@ -304,43 +304,21 @@ class FedWorker:
         self.model.load_state_dict(state)
 
 
-
-
 def main():
-    cfg = {
-        'group': wandb.util.generate_id(),
-        'samples_per_class': 3,
-        'dataset': 'CIFAR100',
-        'data_variant': 'iid',
-        'subclasses': [0,2,20,63,71,82],
-        'parties': 10,
-        'load_private_idx': True,
-        'optim': 'Adam',
-        'init_public_lr': 0.001,
-        'init_public_epochs': 20,
-        'init_public_batch_size': 128,
-        'init_private_epochs': 25,
-        'init_private_batch_size': 32,
-        'collab_rounds': 20,
-        'alignment_mode': 'public',
-        'num_alignment': 5000,
-        'logits_matching_epochs': 1,
-        'logits_matching_batchsize': 256,
-        'private_training_epochs': 4,
-        # 'private_training_batchsize': 5, # TODO not supported
-        'model_averaging': False,
-        'stages': ['init_public', 'init_private', 'collab', 'lower', 'upper'],
-    }
-
-    cfg['model_mapping'] =  list(islice(cycle(range(len(FedMD.FedMD_CIFAR_hyper))), cfg['parties']))
-    # cfg['model_mapping'] = list(repeat(4, cfg['parties']))
+    global cfg
+    with open('config_fedmd_cifar_iid.py') as f:
+        exec(f.read())
 
     wandb.init(project='mp-test', entity='maschm',
                # group=cfg['group'], job_type="master", name=cfg['group'],
-               config=cfg, config_exclude_keys=['group', 'rank', 'model'],
+               config=cfg, config_exclude_keys=cfg['ignore'],
                sync_tensorboard=True)
 
-    import CIFAR as Data
+    if cfg['dataset'] == 'CIFAR100' or cfg['dataset'] == 'CIFAR':
+        import CIFAR as Data
+    else:
+        raise NotImplementedError(f"dataset '{cfg['dataset']}' is unknown")
+
     private_partial_idxs = load_idx_from_artifact(
         np.array(Data.private_train_data.targets),
         cfg['parties'],
@@ -367,7 +345,7 @@ def main():
     print("subclasses: ", subclass_names)
     print("all classes: ", combined_class_names)
 
-    with Pool(4, init_pool_process,
+    with Pool(cfg['pool_size'], init_pool_process,
               [dill.dumps(private_partial_dls),
                dill.dumps(private_combined_dl),
                dill.dumps(private_test_dl),
@@ -379,12 +357,11 @@ def main():
             p_cfg['rank'] = i
             p_cfg['model'] = cfg['model_mapping'][i]
             p_cfg['path'] = Path(wandb.run.dir)
-            args.append((i,p_cfg));
-
+            args.append((i, p_cfg))
         workers = pool.starmap(FedWorker, args)
 
         if "init_public" in cfg['stages']:
-            print(f"All parties starting with 'init_public'")
+            print("All parties starting with 'init_public'")
             res = pool.map(FedWorker.init_public, workers)
             [workers, res] = list(zip(*res))
             [acc, loss] = list(zip(*res))
@@ -392,7 +369,7 @@ def main():
             wandb.run.summary["init_public/loss"] = np.average(loss)
 
         if "init_private" in cfg['stages']:
-            print(f"All parties starting with 'init_private'")
+            print("All parties starting with 'init_private'")
             res = pool.map(FedWorker.init_private, workers)
             [workers, res] = list(zip(*res))
             [acc, loss] = list(zip(*res))
@@ -400,7 +377,7 @@ def main():
             wandb.run.summary["init_private/loss"] = np.average(loss)
 
         if "collab" in cfg['stages']:
-            print(f"All parties starting with 'collab'")
+            print("All parties starting with 'collab'")
             res = pool.map(FedWorker.start_collab, workers)
             [workers, res] = list(zip(*res))
             [acc, loss] = list(zip(*res))
@@ -409,7 +386,7 @@ def main():
             return
 
         for n in range(cfg['collab_rounds']):
-            alingment_data, avg_logits = None, None
+            alignment_data, avg_logits = None, None
             if cfg['alignment_mode'] != "none":
                 if cfg['alignment_mode'] == "public":
                     print(f"Alignment Data: {cfg['num_alignment']} random examples from the public dataset")
@@ -423,7 +400,7 @@ def main():
                 elif cfg['alignment_mode'] == "random":
                     print(f"Alignment Data: {cfg['num_alignment']} random noise inputs")
                     alignment_data = torch.rand([cfg['num_alignment']]
-                                                + list(private_train_data[0][0].shape))
+                                                + list(Data.private_train_data[0][0].shape))
                 else:
                     raise NotImplementedError(f"alignment_mode '{cfg['alignment_mode']}' is unknown")
 
@@ -437,7 +414,7 @@ def main():
                 avg_logits /= len(logits)
 
             res = pool.starmap(FedWorker.collab_round,
-                                zip(workers, repeat(alignment_data), repeat(avg_logits)))
+                               zip(workers, repeat(alignment_data), repeat(avg_logits)))
             [workers, res] = list(zip(*res))
             [acc, loss] = list(zip(*res))
             wandb.log({"acc": np.average(acc), "loss": np.average(loss)})
@@ -446,7 +423,7 @@ def main():
                 pass
 
         if "upper" in cfg['stages']:
-            print(f"All parties starting with 'upper'")
+            print("All parties starting with 'upper'")
             res = pool.map(FedWorker.upper_bound, workers)
             [workers, res] = list(zip(*res))
             [acc, loss] = list(zip(*res))
@@ -454,7 +431,7 @@ def main():
             wandb.run.summary["upper/loss"] = np.average(loss)
 
         if "lower" in cfg['stages']:
-            print(f"All parties starting with 'lower'")
+            print("All parties starting with 'lower'")
             res = pool.map(FedWorker.lower_bound, workers)
             [workers, res] = list(zip(*res))
             [acc, loss] = list(zip(*res))
@@ -465,5 +442,5 @@ def main():
 
 
 if __name__ == '__main__':
-    mp.set_start_method('spawn')#, force=True)
+    mp.set_start_method('spawn')  #, force=True)
     main()
