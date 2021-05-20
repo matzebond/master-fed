@@ -21,7 +21,8 @@ from ignite.engine import Engine, Events, create_supervised_trainer, create_supe
 import FedMD
 from data import load_idx_from_artifact, build_private_dls
 import util
-from nn import KLDivSoftmaxLoss
+from nn import KLDivSoftmaxLoss, avg_params
+
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 print(f"Using device: {device}")
@@ -159,7 +160,7 @@ class FedWorker:
 
 
     def coarse_eval(self, dls):
-        self.gstep -= 1
+        self.gstep = max(0, self.gstep-1)
         return self.evaluate(None, "coarse", dls, add_stage=True)
 
 
@@ -199,7 +200,9 @@ class FedWorker:
         torch.save(self.model.state_dict(), f"{self.cfg['path']}/init_private.pth")
         torch.save(self.optimizer.state_dict(), f"{self.cfg['path']}/init_private_optim.pth")
 
-        res = self.evaluator.state.metrics['acc'], self.evaluator.state.metrics['loss']
+        res = 0, 0
+        if self.cfg['init_public_epochs'] > 0:
+            res = self.evaluator.state.metrics['acc'], self.evaluator.state.metrics['loss']
         self.teardown()
         return res
 
@@ -416,11 +419,21 @@ def main():
             res = pool.starmap(FedWorker.collab_round,
                                zip(workers, repeat(alignment_data), repeat(avg_logits)))
             [workers, res] = list(zip(*res))
-            [acc, loss] = list(zip(*res))
-            wandb.log({"acc": np.average(acc), "loss": np.average(loss)})
 
             if cfg['model_averaging']:
-                pass
+                model_global = avg_params(list(map(lambda w: w.model, workers)))
+                print("model parameters averaged")
+
+                evaluator = create_supervised_evaluator(
+                    model_global.to(device),
+                    {"acc": metrics.Accuracy(),
+                     "loss": metrics.Loss(nn.CrossEntropyLoss())},
+                    device)
+                evaluator.run(private_test_dl)
+                wandb.log(evaluator.state.metrics)
+            else:
+                [acc, loss] = list(zip(*res))
+                wandb.log({"acc": np.average(acc), "loss": np.average(loss)})
 
         if "upper" in cfg['stages']:
             print("All parties starting with 'upper'")

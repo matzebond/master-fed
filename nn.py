@@ -5,26 +5,28 @@ import torch.nn.functional as F
 from torch.overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic,
     handle_torch_function)
-
+import copy
 from typing import List, Callable, Optional
 
-def avg_params(models: List[nn.Module]) -> None:
-    params = []
-    for p in models[0].parameters():
-        d = torch.zeros_like(p)
-        params.append(d)
+def avg_params(models: List[nn.Module]) -> nn.Module:
+    assert len(models) > 0
+    model_global = copy.deepcopy(models[0])
 
     for model in models:
-        for (p,model_p) in zip(params, model.parameters()):
-            p += model_p
-
-    for p in params:
-        p /= len(models)
-
-    for model in models:
-        for n,(p,model_p) in enumerate(zip(params, model.parameters())):
+        for (global_p,model_p) in zip(model_global.parameters(), model.parameters()):
             with torch.no_grad():
-                model_p.copy_(p)
+                global_p += model_p
+
+    for p in model_global.parameters():
+        with torch.no_grad():
+            p /= len(models)
+
+    for model in models:
+        for (global_p,model_p) in zip(model_global.parameters(), model.parameters()):
+            with torch.no_grad():
+                model_p.copy_(global_p)
+
+    return model_global
 
 
 def reset_all_parameters(model):
