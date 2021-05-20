@@ -309,7 +309,7 @@ class FedWorker:
 
 def main():
     global cfg
-    with open('config_fedmd_cifar_iid.py') as f:
+    with open('config_fedavg_cifar_iid.py') as f:
         exec(f.read())
 
     wandb.init(project='mp-test', entity='maschm',

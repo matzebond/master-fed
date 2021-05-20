@@ -4,7 +4,7 @@ global cfg
 with open('config_base.py') as f:
     exec(f.read())
 
-cfg |= {
+cfg.update({
     'model_averaging': True,
     'samples_per_class': 3,
     'dataset': 'CIFAR100',
@@ -25,6 +25,6 @@ cfg |= {
     'logits_matching_batchsize': 256,
     'private_training_epochs': 5,
     # 'private_training_batchsize': 5, # TODO not supported
-}
+})
 
 cfg['model_mapping'] = list(repeat(3, cfg['parties']))

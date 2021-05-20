@@ -5,7 +5,7 @@ global cfg
 with open('config_base.py') as f:
     exec(f.read())
 
-cfg |= {
+cfg.update({
     'samples_per_class': 3,
     'dataset': 'CIFAR100',
     'data_variant': 'iid',
@@ -26,7 +26,7 @@ cfg |= {
     'private_training_epochs': 4,
     # 'private_training_batchsize': 5, # TODO not supported
     'model_averaging': False,
-}
+})
 
 cfg['model_mapping'] =  list(islice(cycle(range(len(FedMD.FedMD_CIFAR_hyper))),
                                     cfg['parties']))
