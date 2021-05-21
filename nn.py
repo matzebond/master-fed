@@ -8,6 +8,7 @@ from torch.overrides import (
 import copy
 from typing import List, Callable, Optional
 
+
 def avg_params(models: List[nn.Module]) -> nn.Module:
     assert len(models) > 0
     model_global = copy.deepcopy(models[0])
@@ -35,6 +36,14 @@ def reset_all_parameters(model):
         model.reset_parameters()
     else:
         pass
+
+
+def optim_to(optimizer, device):
+    for state in optimizer.state.values():
+        for k, v in state.items():
+            if torch.is_tensor(v):
+                state[k] = v.to(device)
+    return optimizer
 
 
 class KLDivSoftmaxLoss(nn.modules.loss._WeightedLoss):

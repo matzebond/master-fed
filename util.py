@@ -212,9 +212,3 @@ def load_model_artifact(stage, version="latest", logging=True):
     return model_artifact
 
 
-def optim_to(optimizer, device):
-    for state in optimizer.state.values():
-        for k, v in state.items():
-            if torch.is_tensor(v):
-                state[k] = v.to(device)
-    return optimizer

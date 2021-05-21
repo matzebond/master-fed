@@ -21,7 +21,7 @@ from ignite.engine import Engine, Events, create_supervised_trainer, create_supe
 import FedMD
 from data import load_idx_from_artifact, build_private_dls
 import util
-from nn import KLDivSoftmaxLoss, avg_params
+from nn import KLDivSoftmaxLoss, avg_params, optim_to
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -63,7 +63,7 @@ class FedWorker:
 
         print(f"start run {self.cfg['rank']} in pid {os.getpid()}")
 
-        self.cfg['architecture'] = FedMD.FedMD_CIFAR_hyper[self.cfg['model']]
+        self.cfg['architecture'] = FedMD.FedMD_CIFAR.hyper[self.cfg['model']]
         self.model = FedMD.FedMD_CIFAR(10+len(cfg['subclasses']),
                                        (3, 32, 32),
                                        *self.cfg['architecture'])
@@ -88,7 +88,7 @@ class FedWorker:
                                           lr=self.cfg['init_public_lr'])
         if optimizer_state is not None:
             self.optimizer.load_state_dict(optimizer_state)
-            util.optim_to(self.optimizer, device)
+            optim_to(self.optimizer, device)
 
         self.trainer = create_supervised_trainer(
             self.model,
@@ -122,7 +122,7 @@ class FedWorker:
 
     def teardown(self, save_optimizer=False):
         if save_optimizer:
-            self.optim_state = util.optim_to(self.optimizer, "cpu").state_dict()
+            self.optim_state = optim_to(self.optimizer, "cpu").state_dict()
 
         del self.optimizer, self.trainer, self.trainer_logit, self.evaluator
         del self.private_dl, self.public_dls, self.private_dls

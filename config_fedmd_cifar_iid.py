@@ -28,5 +28,5 @@ cfg.update({
     'model_averaging': False,
 })
 
-cfg['model_mapping'] =  list(islice(cycle(range(len(FedMD.FedMD_CIFAR_hyper))),
+cfg['model_mapping'] =  list(islice(cycle(range(len(FedMD.FedMD_CIFAR.hyper))),
                                     cfg['parties']))

@@ -3,22 +3,21 @@ from torch import nn
 import numpy as np
 
 # from the FedMD paper
-FedMD_CIFAR_hyper = [
-        [128, 256, None, None, 0.2],
-        [128, 128, 192,  None, 0.2],
-        [64,  64,  64,   None, 0.2],
-        [128, 64,  64,   None, 0.3],
-        [64,  64,  128,  None, 0.4],
-        [64,  128, 256,  None, 0.2],
-        [64,  128, 192,  None, 0.2],
-        [128, 192, 256,  None, 0.2],
-        [128, 128, 128,  None, 0.3],
-        [64,  64,  64,   64,   0.2]
-]
 
 # basic structure from https://github.com/Tzq2doc/FedMD/blob/master/Neural_Networks.py
 # but stride and padding in layer 3 and 4 modified
 class FedMD_CIFAR(nn.Module):
+    hyper = [[128, 256, None, None, 0.2],
+             [128, 128, 192,  None, 0.2],
+             [64,  64,  64,   None, 0.2],
+             [128, 64,  64,   None, 0.3],
+             [64,  64,  128,  None, 0.4],
+             [64,  128, 256,  None, 0.2],
+             [64,  128, 192,  None, 0.2],
+             [128, 192, 256,  None, 0.2],
+             [128, 128, 128,  None, 0.3],
+             [64,  64,  64,   64,   0.2]]
+
     def __init__(self, n_classes, input_size, layer1, layer2, layer3, layer4, dropout):
         super(FedMD_CIFAR, self).__init__()
         output_size = input_size
