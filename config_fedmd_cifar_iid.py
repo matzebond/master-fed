@@ -8,7 +8,7 @@ with open('config_base.py') as f:
 cfg.update({
     'samples_per_class': 3,
     'dataset': 'CIFAR100',
-    'data_variant': 'iid',
+    'concentration': 'iid',
     'subclasses': [0,2,20,63,71,82],
     'parties': 10,
     'load_private_idx': True,

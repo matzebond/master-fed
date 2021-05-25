@@ -326,7 +326,8 @@ def main():
         np.array(Data.private_train_data.targets),
         cfg['parties'],
         cfg['subclasses'],
-        cfg['samples_per_class']
+        cfg['samples_per_class'],
+        cfg['concentration']
     )
     private_partial_dls, private_combined_dl, private_test_dl = build_private_dls(
         Data.private_train_data,
