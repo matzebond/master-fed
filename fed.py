@@ -68,8 +68,6 @@ class FedWorker:
                                        (3, 32, 32),
                                        *self.cfg['architecture'])
 
-        self.cfg['path'] = self.cfg['path'] / str(self.cfg['rank'])
-
         # w_run = wandb.init(project='mp-test', entity='maschm',
         #                    group=self.cfg['group'], job_type='party',
         #                    config=self.cfg, config_exclude_keys=cfg['ignore'],
@@ -309,13 +307,15 @@ class FedWorker:
 
 def main():
     global cfg
-    with open('config_fedavg_cifar_iid.py') as f:
+    with open('config_test.py') as f:
         exec(f.read())
 
+    wandb.tensorboard.patch(root_logdir="wandb/latest-run/files")
     wandb.init(project='mp-test', entity='maschm',
                # group=cfg['group'], job_type="master", name=cfg['group'],
                config=cfg, config_exclude_keys=cfg['ignore'],
                sync_tensorboard=True)
+    cfg['path'] = Path(wandb.run.dir)
 
     if cfg['dataset'] == 'CIFAR100' or cfg['dataset'] == 'CIFAR':
         import CIFAR as Data
@@ -356,11 +356,11 @@ def main():
                dill.dumps(public_test_dl)]) as pool:
         args = []
         for i in range(cfg['parties']):
-            p_cfg = cfg.copy()
-            p_cfg['rank'] = i
-            p_cfg['model'] = cfg['model_mapping'][i]
-            p_cfg['path'] = Path(wandb.run.dir)
-            args.append((i, p_cfg))
+            w_cfg = cfg.copy()
+            w_cfg['rank'] = i
+            w_cfg['model'] = cfg['model_mapping'][i]
+            w_cfg['path'] = cfg['path'] / str(i)
+            args.append((i, w_cfg))
         workers = pool.starmap(FedWorker, args)
 
         if "init_public" in cfg['stages']:
@@ -450,6 +450,11 @@ def main():
             [acc, loss] = list(zip(*res))
             wandb.run.summary["lower/acc"] = np.average(acc)
             wandb.run.summary["lower/loss"] = np.average(loss)
+
+
+    util.merge_tb_files(map(lambda w: w.cfg['path'], workers))
+    util.reduce_tb_events(f"{cfg['path']}/*/*complete*", str(cfg['path'] / "all") ,
+                          reduce_ops = ["mean", "min", "max"])
 
     wandb.finish()
 

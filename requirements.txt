@@ -1,0 +1,7 @@
+torch
+torchvision
+pytorch-ignite
+tensorboard
+tensorboard_reducer
+dill
+wandb

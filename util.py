@@ -3,7 +3,8 @@ import torchvision
 from torchvision import datasets, transforms
 from torchvision.transforms import ToTensor, Lambda, Compose
 import matplotlib.pyplot as plt
-
+from pathlib import Path
+from typing import List
 
 def example(model, data, classes, inst):
     model.eval()
@@ -164,11 +165,11 @@ def generate_total_indices(y, classes_in_use = range(11)):
 
 
 # save model (after public training)
-def save_model_artifact(stage):
+def save_model_artifact(model, rank, stage, path='./'):
     model_artifact = wandb.Artifact(stage, type='model')
 
     for num, m in enumerate(cfg.model_mapping):
-        path = f"models/{stage}_model-{m}.pth"
+        path = f"{path}/{stage}_model-{m}.pth"
         torch.save(models[num].state_dict(), path)
         model_artifact.add_file(path)
 
@@ -212,3 +213,26 @@ def load_model_artifact(stage, version="latest", logging=True):
     return model_artifact
 
 
+
+from tensorboard_reducer import load_tb_events, write_tb_events, reduce_events
+import shutil
+import os
+
+def merge_tb_files(input_dirs: List[Path]):
+    comp_files = []
+    for d in input_dirs:
+        event_files = list(d.glob("events.out.tfevents*"))
+        comp_file = d / "events.out.tfevents.complete"
+        with open(comp_file, "xb") as compfile:
+            for f in event_files:
+                with open(f, "rb") as partfile:
+                    shutil.copyfileobj(partfile, compfile)
+                # os.remove(f)
+        comp_files.append(str(comp_file))
+
+def reduce_tb_events(indirs_glob, outdir,
+                     overwrite = False,
+                     reduce_ops = ["mean", "min", "max"]):
+    events_dict = load_tb_events(indirs_glob)
+    reduced_events = reduce_events(events_dict, reduce_ops)
+    write_tb_events(reduced_events, outdir, overwrite)
