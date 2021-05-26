@@ -53,30 +53,31 @@ def generate_total_indices(y, classes_in_use = range(10)):
 
 
 def load_idx_from_artifact(targets, parties, subclasses, samples_per_class, concentration):
-    
-    idx_artifact_name = f"private_idx_p{parties}_s{samples_per_class}_c{concentration}_C{'-'.join(map(str,subclasses))}"
-
+    idx_artifact_name = f"p{parties}_s{samples_per_class}_c{concentration}_C{'-'.join(map(str,subclasses))}"
     try:
         idx_artifact = wandb.use_artifact(f"{idx_artifact_name}:latest",
-                                          type='private_data')
+                                          type='private_indices')
         # artifact_dir = idx_artifact.download()
         idx_file = idx_artifact.get_path('private_partial_train_idx.npy').download()
-        print(idx_file)
         idxs = np.load(idx_file)
         print(f'Private Idx: Use "{idx_artifact_name}" artifact with saved private indices')
         
     except (wandb.CommError, Exception):
         print(f'Private Idx: Create "{idx_artifact_name}" artifact with new random private indices')
         idxs, idxs_num = generate_indices(targets, parties, subclasses, samples_per_class, concentration)
-        np.save('private_partial_train_idx.npy', idxs)
         idx_artifact = wandb.Artifact(idx_artifact_name, type='private_indices',
                                       metadata={'parties': parties,
                                                 'samples_per_class': samples_per_class,
                                                 'subclasses': subclasses,
                                                 'concentration': concentration,
                                                 'distributions': idxs_num})
-        idx_artifact.add_file('private_partial_train_idx.npy')
+        with idx_artifact.new_file('private_partial_train_idx.npy', 'xb') as f:
+            np.save(f, idxs)
         wandb.log_artifact(idx_artifact)
+    try:
+        idx_artifact.wait()  # throws execption in offline mode
+    except Exception as e:
+        pass
     print("class distributions:\n", idx_artifact.metadata['distributions'])
     return idxs[:parties]
 

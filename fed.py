@@ -67,15 +67,9 @@ class FedWorker:
         self.model = FedMD.FedMD_CIFAR(10+len(cfg['subclasses']),
                                        (3, 32, 32),
                                        *self.cfg['architecture'])
-
-        # w_run = wandb.init(project='mp-test', entity='maschm',
-        #                    group=self.cfg['group'], job_type='party',
-        #                    config=self.cfg, config_exclude_keys=cfg['ignore'],
-        #                    sync_tensorboard=True)
-        # wandb.watch(self.model)
+        os.makedirs(self.cfg['path'])
 
         self.gstep = 0
-
         self.optim_state = None
 
 
@@ -372,6 +366,11 @@ def main():
             wandb.run.summary["init_public/acc"] = np.average(acc)
             wandb.run.summary["init_public/loss"] = np.average(loss)
 
+            paths = [w.cfg['path'] for w in workers]
+            util.save_models_to_artifact(cfg, workers, (acc,loss), "init_public")
+        elif "load_init_public" in cfg['stages']:
+            util.load_models_from_artifact(cfg, workers, "init_public")
+
         if "init_private" in cfg['stages']:
             print("All parties starting with 'init_private'")
             res = pool.map(FedWorker.init_private, workers)
@@ -379,6 +378,12 @@ def main():
             [acc, loss] = list(zip(*res))
             wandb.run.summary["init_private/acc"] = np.average(acc)
             wandb.run.summary["init_private/loss"] = np.average(loss)
+
+            paths = [w.cfg['path'] for w in workers]
+            util.save_models_to_artifact(cfg, workers, (acc,loss), "init_private")
+        elif "load_init_private" in cfg['stages']:
+            util.load_models_from_artifact(cfg, workers, "init_private")
+
 
         if "collab" in cfg['stages']:
             print("All parties starting with 'collab'")
