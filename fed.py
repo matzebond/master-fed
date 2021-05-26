@@ -337,8 +337,7 @@ def main():
                                 batch_size=cfg['init_public_batch_size'])
 
     print(f"train {cfg['parties']} models on")
-    subclass_names = list(map(lambda x: Data.private_train_data.classes[x],
-                              cfg['subclasses']))
+    subclass_names = [Data.private_train_data.classes[x] for x in cfg['subclasses']]
     combined_class_names = Data.public_train_data.classes + subclass_names
     print("subclasses: ", subclass_names)
     print("all classes: ", combined_class_names)
@@ -427,7 +426,7 @@ def main():
             [workers, res] = list(zip(*res))
 
             if cfg['model_averaging']:
-                model_global = avg_params(list(map(lambda w: w.model, workers)))
+                model_global = avg_params([w.model for w in workers])
                 print("model parameters averaged")
 
                 evaluator = create_supervised_evaluator(
@@ -458,7 +457,7 @@ def main():
             wandb.run.summary["lower/loss"] = np.average(loss)
 
 
-    util.merge_tb_files(map(lambda w: w.cfg['path'], workers))
+    util.merge_tb_files((w.cfg['path'] for w in workers))
     util.reduce_tb_events(f"{cfg['path']}/*/*complete*", str(cfg['path'] / "all") ,
                           reduce_ops = ["mean", "min", "max"])
 
