@@ -18,7 +18,8 @@ import ignite
 from ignite import metrics
 from ignite.engine import (Engine, Events,
                            create_supervised_trainer,
-                           create_supervised_evaluator)
+                           create_supervised_evaluator,
+                           _prepare_batch)
 
 import FedMD
 from data import load_idx_from_artifact, build_private_dls
@@ -243,20 +244,17 @@ class FedWorker:
             self.model.train()
             x = batch[0].to(device)
             with torch.no_grad():
-                logits = self.model(x)
-            if engine.state.iteration > 1:
-                engine.state.logits = torch.cat((engine.state.logits, logits))
-            else:
-                engine.state.logits = logits
+                logits = self.model(x) / self.cfg['logits_temperature']
+            engine.state.logits = torch.cat((engine.state.logits, logits.cpu()))
 
         alignment_ds = DataLoader(TensorDataset(alignment_data),
                                   batch_size=self.cfg['logits_matching_batchsize'])
         logit_collector = Engine(logit_collect)
+        logit_collector.state.logits = torch.tensor([])
         logit_collector.run(alignment_ds)
 
         self.teardown()
-        return logit_collector.state.logits.cpu()
-
+        return logit_collector.state.logits
 
     @self_dec
     def collab_round(self, alignment_data = None, logits = None):
@@ -264,12 +262,16 @@ class FedWorker:
 
         if alignment_data != None and logits != None:
             logit_loss_fn = nn.L1Loss() # KLDivSoftmaxLoss(), nn.MSELoss()
-            trainer_logit = create_supervised_trainer(
-                self.model,
-                self.optimizer,
-                logit_loss_fn,
-                device,
-            )
+            def train_logit(engine, batch):
+                self.model.train()
+                self.optimizer.zero_grad()
+                x, y = _prepare_batch(batch, device=device)
+                y_pred = self.model(x) / self.cfg['logits_temperature']
+                loss = logit_loss_fn(y_pred, y)
+                loss.backward()
+                self.optimizer.step()
+                return loss
+            trainer_logit = Engine(train_logit)
             logit_dl = DataLoader(TensorDataset(alignment_data, logits),
                                   batch_size=self.cfg['logits_matching_batchsize'])
             with trainer_logit.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,

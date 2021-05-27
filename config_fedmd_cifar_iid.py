@@ -11,7 +11,6 @@ cfg.update({
     'concentration': 'iid',
     'subclasses': [0,2,20,63,71,82],
     'parties': 10,
-    'load_private_idx': True,
     'optim': 'Adam',
     'init_public_lr': 0.001,
     'init_public_epochs': 20,
@@ -23,6 +22,7 @@ cfg.update({
     'num_alignment': 5000,
     'logits_matching_epochs': 1,
     'logits_matching_batchsize': 256,
+    'logits_temperature': 1,
     'private_training_epochs': 4,
     # 'private_training_batchsize': 5, # TODO not supported
     'model_averaging': False,
