@@ -16,12 +16,14 @@ from torch.multiprocessing import Pool
 # from multiprocessing.pool import Pool
 import ignite
 from ignite import metrics
-from ignite.engine import Engine, Events, create_supervised_trainer, create_supervised_evaluator
+from ignite.engine import (Engine, Events,
+                           create_supervised_trainer,
+                           create_supervised_evaluator)
 
 import FedMD
 from data import load_idx_from_artifact, build_private_dls
 import util
-from nn import KLDivSoftmaxLoss, avg_params, optim_to
+from nn import (KLDivSoftmaxLoss, avg_params, optim_to)
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -55,7 +57,7 @@ def self_dec(func):
 
 
 class FedWorker:
-    def __init__(self, rank, cfg):
+    def __init__(self, cfg, model):
         self.cfg = cfg
 
         np.random.seed()
@@ -63,10 +65,7 @@ class FedWorker:
 
         print(f"start run {self.cfg['rank']} in pid {os.getpid()}")
 
-        self.cfg['architecture'] = FedMD.FedMD_CIFAR.hyper[self.cfg['model']]
-        self.model = FedMD.FedMD_CIFAR(10+len(cfg['subclasses']),
-                                       (3, 32, 32),
-                                       *self.cfg['architecture'])
+        self.model = model
         os.makedirs(self.cfg['path'])
 
         self.gstep = 0
@@ -86,14 +85,6 @@ class FedWorker:
             self.model,
             self.optimizer,
             nn.CrossEntropyLoss(),
-            device,
-        )
-        self.trainer_logit = create_supervised_trainer(
-            self.model,
-            self.optimizer,
-            # KLDivSoftmaxLoss(),
-            # nn.MSELoss(),
-            nn.L1Loss(),
             device,
         )
         self.evaluator = create_supervised_evaluator(
@@ -116,7 +107,7 @@ class FedWorker:
         if save_optimizer:
             self.optim_state = optim_to(self.optimizer, "cpu").state_dict()
 
-        del self.optimizer, self.trainer, self.trainer_logit, self.evaluator
+        del self.optimizer, self.trainer, self.evaluator
         del self.private_dl, self.public_dls, self.private_dls
         del self.writer
 
@@ -272,12 +263,18 @@ class FedWorker:
         self.setup(self.optim_state)
 
         if alignment_data != None and logits != None:
+            logit_loss_fn = nn.L1Loss() # KLDivSoftmaxLoss(), nn.MSELoss()
+            trainer_logit = create_supervised_trainer(
+                self.model,
+                self.optimizer,
+                logit_loss_fn,
+                device,
+            )
             logit_dl = DataLoader(TensorDataset(alignment_data, logits),
                                   batch_size=self.cfg['logits_matching_batchsize'])
-            with self.trainer_logit.add_event_handler(Events.EPOCH_COMPLETED,
-                                                      self.evaluate,
-                                                      "alignment", self.private_dls):
-                self.trainer_logit.run(logit_dl, self.cfg['logits_matching_epochs'])
+            with trainer_logit.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
+                                                 "alignment", self.private_dls):
+                trainer_logit.run(logit_dl, self.cfg['logits_matching_epochs'])
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "private_training", self.private_dls):
@@ -352,10 +349,15 @@ def main():
         for i in range(cfg['parties']):
             w_cfg = cfg.copy()
             w_cfg['rank'] = i
-            w_cfg['model'] = cfg['model_mapping'][i]
             w_cfg['path'] = cfg['path'] / str(i)
-            args.append((i, w_cfg))
+            w_cfg['model'] = cfg['model_mapping'][i]
+            w_cfg['architecture'] = FedMD.FedMD_CIFAR.hyper[w_cfg['model']]
+            model = FedMD.FedMD_CIFAR(*w_cfg['architecture'],
+                                      n_classes = 10+len(cfg['subclasses']),
+                                      input_size = (3, 32, 32))
+            args.append((w_cfg, model))
         workers = pool.starmap(FedWorker, args)
+        del args
 
         if "init_public" in cfg['stages']:
             print("All parties starting with 'init_public'")

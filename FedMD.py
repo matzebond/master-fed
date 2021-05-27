@@ -18,7 +18,11 @@ class FedMD_CIFAR(nn.Module):
              [128, 128, 128,  None, 0.3],
              [64,  64,  64,   64,   0.2]]
 
-    def __init__(self, n_classes, input_size, layer1, layer2, layer3, layer4, dropout):
+    def __init__(self,
+                 layer1, layer2, layer3, layer4, dropout,
+                 projection_size = None,
+                 n_classes = 10,
+                 input_size = (3, 32, 32)):
         super(FedMD_CIFAR, self).__init__()
         output_size = input_size
         calc_size = lambda x, k, s, p: (x + 2*p - k)/s + 1
@@ -36,7 +40,7 @@ class FedMD_CIFAR(nn.Module):
         else:
             self.layer1 = nn.Identity()
             output_size = input_size
-            
+
         if layer2:
             self.layer2 = nn.Sequential(
                 nn.Conv2d(output_size[0], layer2, kernel_size = 2, stride = 2, padding = 0),
@@ -50,7 +54,7 @@ class FedMD_CIFAR(nn.Module):
             output_size = (layer2, tmp1, tmp2)
         else:
             self.layer2 = nn.Identity()
-            
+
         if layer3:
             self.layer3 = nn.Sequential(
                 nn.Conv2d(output_size[0], layer3, kernel_size = 3, stride = 1, padding = 0),
@@ -64,7 +68,7 @@ class FedMD_CIFAR(nn.Module):
             output_size = (layer3, tmp1, tmp2)
         else:
             self.layer3 = nn.Identity()
-            
+
         if layer4:
             self.layer4 = nn.Sequential(
                 nn.AvgPool2d(kernel_size = 2, stride = 2, padding = 0) if layer3 else nn.Identity(),
@@ -79,15 +83,27 @@ class FedMD_CIFAR(nn.Module):
         else:
             self.layer4 = nn.Identity()
 
-        self.linear = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(int(np.prod(output_size)), n_classes, bias = False),
-        )
+        if not projection_size:
+            self.projection_head = nn.Flatten()
+        else:
+            self.projection_head = nn.Linear(int(np.prod(output_size)), projection_size)
+            output_size = projection_size
 
-    def forward(self, x):
+        self.output = nn.Linear(int(np.prod(output_size)), n_classes, bias = False)
+
+    def forward(self, x, output='logits'):
         x = self.layer1(x)
         x = self.layer2(x)
         x = self.layer3(x)
         x = self.layer4(x)
-        logits = self.linear(x)
-        return logits
+        x = x.flatten(start_dim=1)
+
+        rep = self.projection_head(x)
+        if output == 'rep_only':
+            return rep
+
+        logits = self.output(rep)
+        if output == 'both':
+            return logits, rep
+        else:
+            return logits
