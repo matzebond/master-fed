@@ -8,7 +8,13 @@ cfg.update({
     'stages': ['init_public', 'init_private', 'collab'],
     'pool_size': 2,
 
+    'keep_prev_model': True,
     'model_averaging': True,
+    'send_global': True,
+    'contrastive_loss': 'moon',
+    'contrastive_loss_weight': 5,
+    'contrastive_loss_temperature': 1,
+
     'samples_per_class': 20,
     'dataset': 'CIFAR100',
     'concentration': 0.1,

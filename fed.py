@@ -3,12 +3,14 @@ import os
 import logging
 from itertools import repeat
 from pathlib import Path
+import copy
 
 import dill
 import wandb
 import numpy as np
 import torch
 from torch import nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader, Subset, TensorDataset
 from torch.utils.tensorboard import SummaryWriter
 import torch.multiprocessing as mp
@@ -60,18 +62,16 @@ def self_dec(func):
 class FedWorker:
     def __init__(self, cfg, model):
         self.cfg = cfg
+        print(f"start run {self.cfg['rank']} in pid {os.getpid()}")
 
         np.random.seed()
         torch.manual_seed(np.random.randint(0, 0xffff_ffff))
 
-        print(f"start run {self.cfg['rank']} in pid {os.getpid()}")
-
-        self.model = model
         os.makedirs(self.cfg['path'])
-
+        self.model = model
+        self.prev_model = None
         self.gstep = 0
         self.optim_state = None
-
 
     def setup(self, optimizer_state=None):
         self.model = self.model.to(device)
@@ -257,7 +257,7 @@ class FedWorker:
         return logit_collector.state.logits
 
     @self_dec
-    def collab_round(self, alignment_data = None, logits = None):
+    def collab_round(self, alignment_data = None, logits = None, global_model = None):
         self.setup(self.optim_state)
 
         if alignment_data != None and logits != None:
@@ -278,24 +278,54 @@ class FedWorker:
                                                  "alignment", self.private_dls):
                 trainer_logit.run(logit_dl, self.cfg['logits_matching_epochs'])
 
-        with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
+
+        if global_model:
+            global_model = global_model.to(device)
+            global_model.eval()
+        if self.prev_model:
+            self.prev_model = self.prev_model.to(device)
+            self.prev_model.eval()
+
+        def train_collab(engine, batch):
+            self.model.train()
+            self.optimizer.zero_grad()
+            x, y = _prepare_batch(batch, device=device)
+            y_pred, rep = self.model(x, output='both')
+            loss_target = F.cross_entropy(y_pred, y)
+            loss = loss_target
+
+            if self.cfg['contrastive_loss'] == 'moon' and self.prev_model:
+                rep_global = global_model(x, output='rep_only')
+                rep_prev = self.prev_model(x, output='rep_only')
+
+                pos = F.cosine_similarity(rep, rep_global)
+                neg = F.cosine_similarity(rep, rep_prev)
+
+                logits = torch.cat((pos, neg), dim=1)
+                logits /= self.cfg['contrastive_loss_temperature']
+                labels = torch.zeros(x.size(0), device=device).long()
+
+                loss_moon = F.cross_entropy(logits, labels)
+                loss += self.cfg['contrastive_loss_weight'] * loss_moon
+
+            loss.backward()
+            self.optimizer.step()
+            return loss
+        trainer_colab = Engine(train_collab)
+
+        with trainer_colab.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "private_training", self.private_dls):
-            self.trainer.run(self.private_dl, self.cfg['private_training_epochs'])
+            trainer_colab.run(self.private_dl, self.cfg['private_training_epochs'])
         
         res = self.coarse_eval(self.private_dls)
 
         self.teardown(save_optimizer=True)
+        if global_model:
+            global_model = global_model.cpu() # TODO is this needed?
+        if self.cfg['keep_prev_model']:
+            # self.prev_model = self.prev_model.cpu() # TODO is this needed?
+            prev_model = copy.deepcopy(self.model)
         return res
-
-
-    @self_dec
-    def get_model_state(self):
-        return self.model.state_dict()
-
-
-    @self_dec
-    def set_model_state(self, state):
-        self.model.load_state_dict(state)
 
 
 def main():
@@ -303,11 +333,12 @@ def main():
     with open('config_test.py') as f:
         exec(f.read())
 
-    wandb.tensorboard.patch(root_logdir="wandb/latest-run/files")
+    # wandb.tensorboard.patch(root_logdir="wandb/latest-run/files")
     wandb.init(project='mp-test', entity='maschm',
                # group=cfg['group'], job_type="master", name=cfg['group'],
                config=cfg, config_exclude_keys=cfg['ignore'],
                sync_tensorboard=True)
+    # wandb.save("./*/*", wandb.run.dir, 'end')
     cfg['path'] = Path(wandb.run.dir)
 
     if cfg['dataset'] == 'CIFAR100' or cfg['dataset'] == 'CIFAR':
@@ -397,6 +428,7 @@ def main():
         else:
             return
 
+        global_model = None
         for n in range(cfg['collab_rounds']):
             alignment_data, avg_logits = None, None
             if cfg['alignment_mode'] != "none":
@@ -426,7 +458,10 @@ def main():
                 avg_logits /= len(logits)
 
             res = pool.starmap(FedWorker.collab_round,
-                               zip(workers, repeat(alignment_data), repeat(avg_logits)))
+                               zip(workers,
+                                   repeat(alignment_data),
+                                   repeat(avg_logits),
+                                   repeat(global_model if cfg['send_global'] else None)))
             [workers, res] = list(zip(*res))
 
             if cfg['model_averaging']:
