@@ -3,6 +3,9 @@ from torchvision import datasets, transforms
 from torchvision.transforms import ToTensor, Lambda, Compose
 
 # https://www.cs.toronto.edu/~kriz/cifar.html
+# CIFAR-10 dataset consists of 60000 32x32 colour images
+# in 10 classes, with 6000 images per class.
+# There are 50000 training images and 10000 test images
 public_train_data = datasets.CIFAR10(
     root="data",
     train=True,
@@ -16,6 +19,10 @@ public_test_data = datasets.CIFAR10(
     transform=ToTensor(),
 )
 
+# This dataset is just like the CIFAR-10,
+# except it has 100 classes containing 600 images each.
+# There are 500 training images and 100 testing images per class
+# grouped into 20 superclasses
 private_train_data = datasets.CIFAR100(
     root="data",
     train=True,
