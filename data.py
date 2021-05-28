@@ -70,7 +70,8 @@ def load_idx_from_artifact(targets, parties, subclasses, samples_per_class, conc
                                                 'samples_per_class': samples_per_class,
                                                 'subclasses': subclasses,
                                                 'concentration': concentration,
-                                                'distributions': idxs_num})
+                                                'distributions': idxs_num,
+                                                'class_total': idxs_num.sum(axis=0)})
         with idx_artifact.new_file('private_partial_train_idx.npy', 'xb') as f:
             np.save(f, idxs)
         wandb.log_artifact(idx_artifact)
@@ -78,7 +79,8 @@ def load_idx_from_artifact(targets, parties, subclasses, samples_per_class, conc
         idx_artifact.wait()  # throws execption in offline mode
     except Exception as e:
         pass
-    print("class distributions:\n", idx_artifact.metadata['distributions'])
+    print("party distributions:\n", idx_artifact.metadata['distributions'])
+    print("class total:\n", idx_artifact.metadata['class_total'])
     return idxs[:parties]
 
 
