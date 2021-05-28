@@ -340,7 +340,7 @@ def main():
         exec(f.read())
 
     # wandb.tensorboard.patch(root_logdir="wandb/latest-run/files")
-    wandb.init(project='mp-test', entity='maschm',
+    wandb.init(project='master-fed', entity='maschm',
                # group=cfg['group'], job_type="master", name=cfg['group'],
                config=cfg, config_exclude_keys=cfg['ignore'],
                sync_tensorboard=True)
