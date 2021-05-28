@@ -100,6 +100,7 @@ def save_models_to_artifact(cfg, workers, info, stage):
 
     wandb.log_artifact(model_artifact)
     try:
+        idx_artifact.wait()  # throws execption in offline mode
         print(f'Model: Save "{stage}" models as version {model_artifact.version}')
     except Exception as e:
         print(f'Model: Save "{stage}" models in offline mode')

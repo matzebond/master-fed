@@ -73,7 +73,7 @@ class FedWorker:
         self.gstep = 0
         self.optim_state = None
 
-    def setup(self, optimizer_state=None):
+    def setup(self, optimizer_state=None, writer=True):
         self.model = self.model.to(device)
 
         self.optimizer = torch.optim.Adam(self.model.parameters(),
@@ -101,7 +101,7 @@ class FedWorker:
         self.private_dls = {"private_train": self.private_dl,
                             "private_test": private_test_dl}
 
-        self.writer = SummaryWriter(self.cfg['path'])
+        self.writer = SummaryWriter(self.cfg['path']) if writer else None
 
 
     def teardown(self, save_optimizer=False):
@@ -245,7 +245,7 @@ class FedWorker:
 
     @self_dec
     def get_logits(self, alignment_data):
-        self.setup()
+        self.setup(writer=False)
         def logit_collect(engine, batch):
             self.model.train()
             x = batch[0].to(device)
