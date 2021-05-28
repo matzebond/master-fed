@@ -33,6 +33,8 @@ cfg.update({
     'logits_matching_batchsize': 256,
     'logits_temperature': 1,
     'private_training_epochs': 2,
+    'upper_bound_epochs': 2,
+    'lower_bound_epochs': 2,
     # 'private_training_batchsize': 5, # TODO not supported
 })
 

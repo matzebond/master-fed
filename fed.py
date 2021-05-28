@@ -199,8 +199,11 @@ class FedWorker:
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "upper", self.private_dls, add_stage=True):
-            epochs = self.cfg['init_private_epochs'] \
-                + self.cfg['collab_rounds'] * self.cfg['private_training_epochs']
+            if 'upper_bound_epochs' in self.cfg:
+                epochs = self.cfg['upper_bound_epochs']
+            else:
+                epochs = self.cfg['init_private_epochs'] \
+                    + self.cfg['collab_rounds'] * self.cfg['private_training_epochs']
             self.trainer.run(private_combined_dl, epochs)
 
         res = self.evaluator.state.metrics['acc'], self.evaluator.state.metrics['loss']
@@ -216,7 +219,10 @@ class FedWorker:
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "lower", self.private_dls, add_stage=True):
-            epochs = self.cfg['collab_rounds'] * self.cfg['private_training_epochs']
+            if 'lower_bound_epochs' in self.cfg:
+                epochs = self.cfg['lower_bound_epochs']
+            else:
+                epochs = self.cfg['collab_rounds'] * self.cfg['private_training_epochs']
             self.trainer.run(self.private_dl, epochs)
 
         res = self.evaluator.state.metrics['acc'], self.evaluator.state.metrics['loss']
@@ -430,6 +436,7 @@ def main():
 
         global_model = None
         for n in range(cfg['collab_rounds']):
+            print(f"All parties starting with collab round [{n+1}/{cfg['collab_rounds']}]")
             alignment_data, avg_logits = None, None
             if cfg['alignment_mode'] != "none":
                 if cfg['alignment_mode'] == "public":
