@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import torchvision
 from torchvision import datasets, transforms
@@ -9,7 +10,7 @@ from collections import defaultdict
 from pathlib import Path
 import os
 import shutil
-from typing import List
+from typing import Union, List
 
 
 def example(model, data, classes, inst):
@@ -122,10 +123,10 @@ def load_models_from_artifact(cfg, workers, stage, version="latest"):
 
 
 
-def merge_tb_files(input_dirs: List[Path]):
+def concat_tb_files(input_dirs: List[Path]):
     comp_files = []
     for d in input_dirs:
-        event_files = list(d.glob("events.out.tfevents*"))
+        event_files = sorted(d.glob("events.out.tfevents*"))
         comp_file = d / "events.out.tfevents.complete"
         with open(comp_file, "xb") as compfile:
             for f in event_files:
@@ -140,3 +141,26 @@ def reduce_tb_events(indirs_glob, outdir,
     events_dict = load_tb_events(indirs_glob)
     reduced_events = reduce_events(events_dict, reduce_ops)
     write_tb_events(reduced_events, outdir, overwrite)
+
+def reduce_tb_events_from_globs(input_globs: List[Union[Path.glob,List[str]]],
+                                outdir: str,
+                                overwrite = False,
+                                reduce_ops = ["mean", "min", "max"]):
+    events_dict = {}
+    for glob in input_globs:
+        run = defaultdict(list)
+        event_files = sorted(list(glob))
+        for efile in event_files:
+            for key, data in load_tb_events(str(efile)).items():
+                run[key] = np.append(run[key], data)
+
+        for key, data in run.items():
+            data = data.reshape(-1,1)
+            if key not in events_dict:
+                events_dict[key] = data
+            else:
+                events_dict[key] = np.hstack((events_dict[key], data))
+
+    reduced_events = reduce_events(events_dict, reduce_ops)
+    write_tb_events(reduced_events, outdir, overwrite)
+    # return reduced_events

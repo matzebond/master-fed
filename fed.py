@@ -503,9 +503,9 @@ def main():
             wandb.run.summary["lower/loss"] = np.average(loss)
 
 
-    util.merge_tb_files((w.cfg['path'] for w in workers))
-    util.reduce_tb_events(f"{cfg['path']}/*/*complete*", str(cfg['path'] / "all") ,
-                          reduce_ops = ["mean", "min", "max"])
+    globs = (w.cfg['path'].glob("events.out.tfevents*") for w in workers)
+    util.reduce_tb_events_from_globs(globs,str(cfg['path'] / "all"),
+                                     reduce_ops = ["mean", "min", "max"])
 
     wandb.finish()
 
