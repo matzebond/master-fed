@@ -8,10 +8,13 @@ cfg.update({
     'stages': ['init_public', 'init_private', 'collab', 'upper', 'lower'],
     'pool_size': 2,
 
-    'keep_prev_model': True,
-    'model_averaging': True,
-    'send_global': True,
-    'contrastive_loss': 'moon',
+    'projection_head': None,
+
+    'variant': None,
+    'keep_prev_model': False,
+    'model_averaging': False,
+    'send_global': False,
+    'contrastive_loss': 'none',
     'contrastive_loss_weight': 5,
     'contrastive_loss_temperature': 1,
 
@@ -27,12 +30,12 @@ cfg.update({
     'init_private_epochs': 0,
     'init_private_batch_size': 32,
     'collab_rounds': 5,
-    'alignment_mode': 'none',
+    'alignment_mode': 'public',
     'num_alignment': 100,
     'logits_matching_epochs': 2,
     'logits_matching_batchsize': 256,
     'logits_temperature': 1,
-    'private_training_epochs': 2,
+    'private_training_epochs': 1,
     # 'private_training_batchsize': 5, # TODO not supported
     'upper_bound_epochs': 2,
     'lower_bound_epochs': 2,

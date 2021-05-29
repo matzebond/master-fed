@@ -5,13 +5,8 @@ with open('config_base.py') as f:
     exec(f.read())
 
 cfg.update({
+    'variant': 'fedavg',
     'projection_head': 256,
-
-    'model_averaging': True,
-    'keep_prev_model': False,
-    'send_global': False,
-    'contrastive_loss': 'none',
-
     'samples_per_class': 20,
     'dataset': 'CIFAR100',
     'concentration': 1,

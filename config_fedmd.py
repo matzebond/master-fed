@@ -5,13 +5,8 @@ with open('config_base.py') as f:
     exec(f.read())
 
 cfg.update({
+    'variant': 'fedmd',
     'projection_head': 256,
-
-    'model_averaging': False,
-    'keep_prev_model': False,
-    'send_global': False,
-    'contrastive_loss': 'none',
-
     'samples_per_class': 20,
     'dataset': 'CIFAR100',
     'concentration': 1,
@@ -27,7 +22,7 @@ cfg.update({
     'alignment_mode': 'public',
     'num_alignment': 1000,
     'logits_matching_epochs': 3,
-    'logits_matching_batchsize': 256,
+    'logits_matching_batchsize': 128,
     'logits_temperature': 1,
     'private_training_epochs': 1,
     # 'private_training_batchsize': 5, # TODO not supported

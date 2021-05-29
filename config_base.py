@@ -2,6 +2,7 @@ import wandb
 
 global cfg
 cfg = {
+    'variant': None,
     'group': wandb.util.generate_id(),
     'stages': ['init_public', 'init_private', 'collab', 'lower', 'upper'],
     'pool_size': 4,

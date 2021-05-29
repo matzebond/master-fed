@@ -5,15 +5,8 @@ with open('config_base.py') as f:
     exec(f.read())
 
 cfg.update({
+    'variant': 'moon',
     'projection_head': 256,
-
-    'keep_prev_model': True,
-    'model_averaging': True,
-    'send_global': True,
-    'contrastive_loss': 'moon',
-    'contrastive_loss_weight': 5,
-    'contrastive_loss_temperature': 1,
-
     'samples_per_class': 20,
     'dataset': 'CIFAR100',
     'concentration': 1,
@@ -29,6 +22,8 @@ cfg.update({
     'alignment_mode': 'none',
     'logits_matching_epochs': 0,
     'private_training_epochs': 5,
+    'contrastive_loss_weight': 5,
+    'contrastive_loss_temperature': 1,
     # 'private_training_batchsize': 5, # TODO not supported
     'upper_bound_epochs': 50,
     'lower_bound_epochs': 50,

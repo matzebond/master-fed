@@ -338,6 +338,22 @@ def main():
     with open('config_test.py') as f:
         exec(f.read())
 
+    if cfg['variant'] == 'fedmd':
+        cfg['model_averaging'] = False
+        cfg['keep_prev_model'] = False
+        cfg['send_global'] = False
+        cfg['contrastive_loss'] = 'none'
+    elif cfg['variant'] == 'fedavg':
+        cfg['model_averaging'] = True
+        cfg['keep_prev_model'] = False
+        cfg['send_global'] = False
+        cfg['contrastive_loss'] = 'none'
+    elif cfg['variant'] == 'moon':
+        cfg['model_averaging'] = True
+        cfg['keep_prev_model'] = True
+        cfg['send_global'] = True
+        cfg['contrastive_loss'] = 'moon'
+
     # wandb.tensorboard.patch(root_logdir="wandb/latest-run/files")
     wandb.init(project='master-fed', entity='maschm',
                # group=cfg['group'], job_type="master", name=cfg['group'],
