@@ -5,6 +5,8 @@ with open('config_base.py') as f:
     exec(f.read())
 
 cfg.update({
+    'projection_head': 256,
+
     'keep_prev_model': True,
     'model_averaging': True,
     'send_global': True,

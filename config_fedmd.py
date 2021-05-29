@@ -5,6 +5,8 @@ with open('config_base.py') as f:
     exec(f.read())
 
 cfg.update({
+    'projection_head': 256,
+
     'model_averaging': False,
     'keep_prev_model': False,
     'send_global': False,
@@ -23,16 +25,18 @@ cfg.update({
     'init_private_batch_size': 32,
     'collab_rounds': 100,
     'alignment_mode': 'public',
-    'num_alignment': 5000,
-    'logits_matching_epochs': 1,
+    'num_alignment': 1000,
+    'logits_matching_epochs': 3,
     'logits_matching_batchsize': 256,
     'logits_temperature': 1,
-    'private_training_epochs': 4,
+    'private_training_epochs': 1,
     # 'private_training_batchsize': 5, # TODO not supported
     'upper_bound_epochs': 50,
     'lower_bound_epochs': 50,
 })
 
-import FedMD
-cfg['model_mapping'] =  list(islice(cycle(range(len(FedMD.FedMD_CIFAR.hyper))),
-                                    cfg['parties']))
+# import FedMD
+# cfg['model_mapping'] =  list(islice(cycle(range(len(FedMD.FedMD_CIFAR.hyper))),
+#                                     cfg['parties']))
+
+cfg['model_mapping'] = list(repeat(3, cfg['parties']))
