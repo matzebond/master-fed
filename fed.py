@@ -243,7 +243,6 @@ class FedWorker:
         return res
 
 
-    @self_dec
     def get_logits(self, alignment_data):
         self.setup(writer=False)
         def logit_collect(engine, batch):
@@ -456,9 +455,9 @@ def main():
                 else:
                     raise NotImplementedError(f"alignment_mode '{cfg['alignment_mode']}' is unknown")
 
-                res = pool.starmap(FedWorker.get_logits,
+                logits = pool.starmap(FedWorker.get_logits,
                                    zip(workers, repeat(alignment_data)))
-                [workers, logits] = list(zip(*res))
+                # [workers, logits] = list(zip(*res))
 
                 avg_logits = torch.zeros_like(logits[0])
                 for l in logits:
