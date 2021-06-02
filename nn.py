@@ -6,28 +6,22 @@ from torch.overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic,
     handle_torch_function)
 import copy
-from typing import List, Callable, Optional
+from typing import List, Callable, Optional, Dict
 
 
-def avg_params(models: List[nn.Module]) -> nn.Module:
+def avg_params(models: List[nn.Module]) -> Dict[str, Tensor]:
     assert len(models) > 0
-    model_global = copy.deepcopy(models[0])
 
-    for model in models:
-        for (global_p,model_p) in zip(model_global.parameters(), model.parameters()):
-            with torch.no_grad():
-                global_p += model_p
+    global_weights = copy.deepcopy(models[0].state_dict())
+    for model in models[1:]:
+        model_weights = model.state_dict()
+        for key in model_weights:
+            global_weights[key] += model_weights[key]
 
-    for p in model_global.parameters():
-        with torch.no_grad():
-            p /= len(models)
+    for key in global_weights:
+        global_weights[key] = global_weights[key] // len(models)
 
-    for model in models:
-        for (global_p,model_p) in zip(model_global.parameters(), model.parameters()):
-            with torch.no_grad():
-                model_p.copy_(global_p)
-
-    return model_global
+    return global_weights
 
 
 def reset_all_parameters(model):

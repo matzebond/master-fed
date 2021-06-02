@@ -457,7 +457,7 @@ def main():
 
         global_model = None
         if cfg['global_model'] != 'none':
-            global_model = None
+            global_model = copy.deepcopy(workers[0].model)
 
         for n in range(cfg['collab_rounds']):
             print(f"All parties starting with collab round [{n+1}/{cfg['collab_rounds']}]")
@@ -496,9 +496,14 @@ def main():
             [workers, res] = list(zip(*res))
 
             if cfg['global_model'] == 'averaging':
-                global_model = avg_params([w.model for w in workers])
+                global_weights = avg_params([w.model for w in workers])
+                global_model.load_state_dict(global_weights)
                 print("model parameters averaged")
+            elif cfg['global_model'] == 'distillation':
+                # TODO
+                pass
 
+            if cfg['global_model'] != 'none':
                 evaluator = create_supervised_evaluator(
                     global_model.to(device),
                     {"acc": metrics.Accuracy(),
@@ -507,8 +512,6 @@ def main():
                 evaluator.run(private_test_dl)
                 global_model = global_model.cpu()
                 wandb.log(evaluator.state.metrics)
-            elif cfg['global_model'] == 'distillation':
-                pass
             else:
                 [acc, loss] = list(zip(*res))
                 wandb.log({"acc": np.average(acc), "loss": np.average(loss)})
@@ -517,7 +520,8 @@ def main():
                 if global_model is None:
                     raise Execption("Global model is None. Can't replace local models")
                 for w in workers:
-                    w.model = copy.deepcopy(global_model)
+                    w.model.load_state_dict(global_model.state_dict())
+                    print("local models replaced")
 
         if "upper" in cfg['stages']:
             print("All parties starting with 'upper'")
