@@ -342,17 +342,19 @@ def main():
         exec(f.read())
 
     if cfg['variant'] == 'fedmd':
-        cfg['model_averaging'] = False
+        cfg['global_model'] = 'none'
         cfg['keep_prev_model'] = False
         cfg['send_global'] = False
         cfg['contrastive_loss'] = 'none'
     elif cfg['variant'] == 'fedavg':
-        cfg['model_averaging'] = True
+        cfg['global_model'] = 'averaging'
+        cfg['replace_local_model'] = True
         cfg['keep_prev_model'] = False
         cfg['send_global'] = False
         cfg['contrastive_loss'] = 'none'
     elif cfg['variant'] == 'moon':
-        cfg['model_averaging'] = True
+        cfg['global_model'] = 'averaging'
+        cfg['replace_local_model'] = True
         cfg['keep_prev_model'] = True
         cfg['send_global'] = True
         cfg['contrastive_loss'] = 'moon'
@@ -454,6 +456,9 @@ def main():
             return
 
         global_model = None
+        if cfg['global_model'] != 'none':
+            global_model = None
+
         for n in range(cfg['collab_rounds']):
             print(f"All parties starting with collab round [{n+1}/{cfg['collab_rounds']}]")
             alignment_data, avg_logits = None, None
@@ -490,7 +495,7 @@ def main():
                                    repeat(global_model if cfg['send_global'] else None)))
             [workers, res] = list(zip(*res))
 
-            if cfg['model_averaging']:
+            if cfg['global_model'] == 'averaging':
                 global_model = avg_params([w.model for w in workers])
                 print("model parameters averaged")
 
@@ -502,9 +507,17 @@ def main():
                 evaluator.run(private_test_dl)
                 global_model = global_model.cpu()
                 wandb.log(evaluator.state.metrics)
+            elif cfg['global_model'] == 'distillation':
+                pass
             else:
                 [acc, loss] = list(zip(*res))
                 wandb.log({"acc": np.average(acc), "loss": np.average(loss)})
+
+            if cfg['replace_local_model']:
+                if global_model is None:
+                    raise Execption("Global model is None. Can't replace local models")
+                for w in workers:
+                    w.model = copy.deepcopy(global_model)
 
         if "upper" in cfg['stages']:
             print("All parties starting with 'upper'")

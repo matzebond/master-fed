@@ -10,13 +10,16 @@ cfg.update({
 
     'projection_head': 64,
 
-    'variant': 'moon',
+    'variant': None,
     'keep_prev_model': True,
-    'model_averaging': True,
+    'global_model': 'averaging',
+    'replace_local_model': True,
     'send_global': True,
+    'send_rep': False,
     'contrastive_loss': 'moon',
     'contrastive_loss_weight': 5,
     'contrastive_loss_temperature': 1,
+    'alignment_mode': 'none',
 
     'samples_per_class': 20,
     'dataset': 'CIFAR100',
@@ -30,7 +33,6 @@ cfg.update({
     'init_private_epochs': 0,
     'init_private_batch_size': 32,
     'collab_rounds': 5,
-    'alignment_mode': 'none',
     'num_alignment': 100,
     'logits_matching_epochs': 2,
     'logits_matching_batchsize': 256,
