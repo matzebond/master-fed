@@ -327,9 +327,11 @@ class FedWorker:
 
         self.teardown(save_optimizer=True)
         if global_model:
-            global_model = global_model.cpu() # TODO is this needed?
+            # global_model = global_model.cpu() # TODO is this needed?
+            pass
         if self.cfg['keep_prev_model']:
             # self.prev_model = self.prev_model.cpu() # TODO is this needed?
+            del self.prev_model
             self.prev_model = copy.deepcopy(self.model)
         return res
 
@@ -498,6 +500,7 @@ def main():
                      "loss": metrics.Loss(nn.CrossEntropyLoss())},
                     device)
                 evaluator.run(private_test_dl)
+                global_model = global_model.cpu()
                 wandb.log(evaluator.state.metrics)
             else:
                 [acc, loss] = list(zip(*res))
@@ -528,5 +531,7 @@ def main():
 
 
 if __name__ == '__main__':
+    # logger = mp.log_to_stderr()
+    # logger.setLevel(multiprocessing.SUBDEBUG)
     mp.set_start_method('spawn')  #, force=True)
     main()
