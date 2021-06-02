@@ -303,13 +303,14 @@ class FedWorker:
                 rep_global = global_model(x, output='rep_only')
                 rep_prev = self.prev_model(x, output='rep_only')
 
-                pos = F.cosine_similarity(rep, rep_global)
-                neg = F.cosine_similarity(rep, rep_prev)
+                pos = F.cosine_similarity(rep, rep_global).reshape(-1,1)
+                neg = F.cosine_similarity(rep, rep_prev).reshape(-1,1)
 
                 logits = torch.cat((pos, neg), dim=1)
                 logits /= self.cfg['contrastive_loss_temperature']
-                labels = torch.zeros(x.size(0), device=device).long()
 
+                # first "class" sim(rep_global) is the ground truth
+                labels = torch.zeros(x.size(0), device=device).long()
                 loss_moon = F.cross_entropy(logits, labels)
                 loss += self.cfg['contrastive_loss_weight'] * loss_moon
 
@@ -329,7 +330,7 @@ class FedWorker:
             global_model = global_model.cpu() # TODO is this needed?
         if self.cfg['keep_prev_model']:
             # self.prev_model = self.prev_model.cpu() # TODO is this needed?
-            prev_model = copy.deepcopy(self.model)
+            self.prev_model = copy.deepcopy(self.model)
         return res
 
 
@@ -488,11 +489,11 @@ def main():
             [workers, res] = list(zip(*res))
 
             if cfg['model_averaging']:
-                model_global = avg_params([w.model for w in workers])
+                global_model = avg_params([w.model for w in workers])
                 print("model parameters averaged")
 
                 evaluator = create_supervised_evaluator(
-                    model_global.to(device),
+                    global_model.to(device),
                     {"acc": metrics.Accuracy(),
                      "loss": metrics.Loss(nn.CrossEntropyLoss())},
                     device)
