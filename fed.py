@@ -418,7 +418,7 @@ def main():
             w_cfg['model'] = cfg['model_mapping'][i]
             w_cfg['architecture'] = FedMD.FedMD_CIFAR.hyper[w_cfg['model']]
             model = FedMD.FedMD_CIFAR(*w_cfg['architecture'],
-                                      projection_size = cfg['projection_head'],
+                                      projection = cfg['projection_head'],
                                       n_classes = 10+len(cfg['subclasses']),
                                       input_size = (3, 32, 32))
             args.append((w_cfg, model))

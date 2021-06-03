@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 import numpy as np
+from typing import Union, List, Optional, Tuple
 
 # from the FedMD paper
 
@@ -19,10 +20,12 @@ class FedMD_CIFAR(nn.Module):
              [64,  64,  64,   64,   0.2]]
 
     def __init__(self,
-                 layer1, layer2, layer3, layer4, dropout,
-                 projection_size = None,
-                 n_classes = 10,
-                 input_size = (3, 32, 32)):
+                 layer1: Optional[int], layer2: Optional[int],
+                 layer3: Optional[int], layer4: Optional[int], dropout: float,
+                 projection: Union[None, int, List[int]] = None,
+                 projection_nonlinear: bool = False,
+                 n_classes: int = 10,
+                 input_size: Tuple[int, int, int] = (3, 32, 32)):
         super(FedMD_CIFAR, self).__init__()
         output_size = input_size
         calc_size = lambda x, k, s, p: (x + 2*p - k)/s + 1
@@ -49,9 +52,9 @@ class FedMD_CIFAR(nn.Module):
                 nn.Dropout(dropout),
                 nn.AvgPool2d(kernel_size = 2, stride = 2, padding = 0)
             )
-            tmp1 = calc_size(calc_size(output_size[1], 2, 2, 0), 2, 2, 0)
-            tmp2 = calc_size(calc_size(output_size[2], 2, 2, 0), 2, 2, 0)
-            output_size = (layer2, tmp1, tmp2)
+            w = calc_size(calc_size(output_size[1], 2, 2, 0), 2, 2, 0)
+            h = calc_size(calc_size(output_size[2], 2, 2, 0), 2, 2, 0)
+            output_size = (layer2, w, h)
         else:
             self.layer2 = nn.Identity()
 
@@ -61,11 +64,11 @@ class FedMD_CIFAR(nn.Module):
                 nn.BatchNorm2d(layer3),
                 nn.ReLU(),
                 nn.Dropout(dropout),
-                #nn.AvgPool2d(kernel_size = 2, stride = 2, padding = 0)
+                # nn.AvgPool2d(kernel_size = 2, stride = 2, padding = 0)
             )
-            tmp1 = calc_size(output_size[1], 3, 1, 0)
-            tmp2 = calc_size(output_size[2], 3, 1, 0)
-            output_size = (layer3, tmp1, tmp2)
+            w = calc_size(output_size[1], 3, 1, 0)
+            h = calc_size(output_size[2], 3, 1, 0)
+            output_size = (layer3, w, h)
         else:
             self.layer3 = nn.Identity()
 
@@ -77,24 +80,32 @@ class FedMD_CIFAR(nn.Module):
                 nn.ReLU(),
                 nn.Dropout(dropout),
             )
-            tmp1 = calc_size(calc_size(output_size[1], 2, 2, 0) if layer3 else output_size[1], 3, 1, 1)
-            tmp2 = calc_size(calc_size(output_size[2], 2, 2, 0) if layer3 else output_size[2], 3, 1, 1)
-            output_size = (layer4, tmp1, tmp2)
+            w = calc_size(calc_size(output_size[1], 2, 2, 0) if layer3 else output_size[1], 3, 1, 1)
+            h = calc_size(calc_size(output_size[2], 2, 2, 0) if layer3 else output_size[2], 3, 1, 1)
+            output_size = (layer4, w, h)
         else:
             self.layer4 = nn.Identity()
 
-        if not projection_size:
-            self.projection_head = nn.Flatten()
+        if projection is None:
+            self.projection = nn.Flatten()
             output_size = int(np.prod(output_size))
         else:
             output_size = int(np.prod(output_size))
-            self.projection_head = nn.Sequential(
-                nn.Flatten(),
-                nn.Linear(output_size, output_size),
-                nn.ReLU(),
-                nn.Linear(output_size, projection_size),
-            )
-            output_size = projection_size
+            proj = [nn.Flatten()]
+            if isinstance(projection, int):
+                projection = [projection]
+            for i in projection:
+                if i == 0:
+                    proj.append(nn.Linear(output_size, output_size))
+                else:
+                    proj.append(nn.Linear(output_size, i))
+                output_size = proj[-1].out_features
+                proj.append(nn.ReLU())
+            if projection_nonlinear:
+                self.projection = nn.Sequential(*proj)
+            else:
+                self.projection = nn.Sequential(*proj[:-1])
+            output_size = proj[-2].out_features
 
         self.output = nn.Linear(output_size, n_classes, bias = False)
 
@@ -104,7 +115,7 @@ class FedMD_CIFAR(nn.Module):
         x = self.layer3(x)
         x = self.layer4(x)
 
-        rep = self.projection_head(x)
+        rep = self.projection(x)
         if output == 'rep_only':
             return rep
 

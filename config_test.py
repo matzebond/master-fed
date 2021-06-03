@@ -8,7 +8,7 @@ cfg.update({
     'stages': ['init_public', 'init_private', 'save_init_private', 'collab', 'save_final'],
     'pool_size': 2,
 
-    'projection_head': 64,
+    'projection_head': [0, 64],
 
     'variant': None,
     'keep_prev_model': True,
