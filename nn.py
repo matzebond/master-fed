@@ -19,7 +19,7 @@ def avg_params(models: List[nn.Module]) -> Dict[str, Tensor]:
             global_weights[key] += model_weights[key]
 
     for key in global_weights:
-        global_weights[key] = global_weights[key] // len(models)
+        global_weights[key] = global_weights[key] / len(models)
 
     return global_weights
 

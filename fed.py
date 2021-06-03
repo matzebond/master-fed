@@ -521,7 +521,7 @@ def main():
                     raise Execption("Global model is None. Can't replace local models")
                 for w in workers:
                     w.model.load_state_dict(global_model.state_dict())
-                    print("local models replaced")
+                print("local models replaced")
 
         if "upper" in cfg['stages']:
             print("All parties starting with 'upper'")
