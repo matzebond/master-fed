@@ -1,9 +1,10 @@
 import functools
-import os
-import logging
 from itertools import repeat
-from pathlib import Path
+import logging
 import copy
+import os
+from pathlib import Path
+import shutil
 
 import dill
 import wandb
@@ -69,6 +70,7 @@ class FedWorker:
         torch.manual_seed(np.random.randint(0, 0xffff_ffff))
 
         os.makedirs(self.cfg['path'])
+        os.makedirs(self.cfg['tmp'])
         self.model = model
         self.prev_model = None
         self.gstep = 0
@@ -161,8 +163,8 @@ class FedWorker:
                                             add_stage=True):
             self.trainer.run(public_train_dl, self.cfg['init_public_epochs'])
 
-        torch.save(self.model.state_dict(), f"{self.cfg['path']}/init_public.pth")
-        torch.save(self.optimizer.state_dict(), f"{self.cfg['path']}/init_public_optim.pth")
+        torch.save(self.model.state_dict(), f"{self.cfg['tmp']}/init_public.pth")
+        torch.save(self.optimizer.state_dict(), f"{self.cfg['tmp']}/init_public_optim.pth")
 
         res = 0, 0
         if self.cfg['init_public_epochs'] > 0:
@@ -174,16 +176,16 @@ class FedWorker:
     @self_dec
     def init_private(self):
         print(f"party {self.cfg['rank']}: start 'init_private' stage")
-        self.model.load_state_dict(torch.load(f"{self.cfg['path']}/init_public.pth"))
+        self.model.load_state_dict(torch.load(f"{self.cfg['tmp']}/init_public.pth"))
         self.gstep = 0
-        self.setup(torch.load(f"{self.cfg['path']}/init_public_optim.pth"))
+        self.setup(torch.load(f"{self.cfg['tmp']}/init_public_optim.pth"))
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "init_private", self.private_dls):
             self.trainer.run(self.private_dl, self.cfg['init_private_epochs'])
 
-        torch.save(self.model.state_dict(), f"{self.cfg['path']}/init_private.pth")
-        torch.save(self.optimizer.state_dict(), f"{self.cfg['path']}/init_private_optim.pth")
+        torch.save(self.model.state_dict(), f"{self.cfg['tmp']}/init_private.pth")
+        torch.save(self.optimizer.state_dict(), f"{self.cfg['tmp']}/init_private_optim.pth")
 
         res = 0, 0
         if self.cfg['init_public_epochs'] > 0:
@@ -194,9 +196,9 @@ class FedWorker:
 
     @self_dec
     def upper_bound(self):
-        self.model.load_state_dict(torch.load(f"{self.cfg['path']}/init_public.pth"))
+        self.model.load_state_dict(torch.load(f"{self.cfg['tmp']}/init_public.pth"))
         self.gstep = 0
-        self.setup(torch.load(f"{self.cfg['path']}/init_public_optim.pth"))
+        self.setup(torch.load(f"{self.cfg['tmp']}/init_public_optim.pth"))
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "upper", self.private_dls, add_stage=True):
@@ -214,9 +216,9 @@ class FedWorker:
 
     @self_dec
     def lower_bound(self):
-        self.model.load_state_dict(torch.load(f"{self.cfg['path']}/init_private.pth"))
+        self.model.load_state_dict(torch.load(f"{self.cfg['tmp']}/init_private.pth"))
         self.gstep = 0
-        self.setup(torch.load(f"{self.cfg['path']}/init_private_optim.pth"))
+        self.setup(torch.load(f"{self.cfg['tmp']}/init_private_optim.pth"))
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "lower", self.private_dls, add_stage=True):
@@ -233,8 +235,8 @@ class FedWorker:
 
     @self_dec
     def start_collab(self):
-        self.model.load_state_dict(torch.load(f"{self.cfg['path']}/init_private.pth"))
-        self.setup(torch.load(f"{self.cfg['path']}/init_private_optim.pth"))
+        self.model.load_state_dict(torch.load(f"{self.cfg['tmp']}/init_private.pth"))
+        self.setup(torch.load(f"{self.cfg['tmp']}/init_private_optim.pth"))
         print(f"party {self.cfg['rank']}: start 'collab' stage")
 
         gstep = self.cfg['init_private_epochs']
@@ -367,6 +369,8 @@ def main():
                sync_tensorboard=True)
     # wandb.save("./*/*", wandb.run.dir, 'end')
     cfg['path'] = Path(wandb.run.dir)
+    cfg['tmp'] = Path("./wandb/tmp/")
+    shutil.rmtree(cfg['tmp'], ignore_errors=True)
 
     if cfg['dataset'] == 'CIFAR100' or cfg['dataset'] == 'CIFAR':
         import CIFAR as Data
@@ -410,6 +414,7 @@ def main():
             w_cfg = cfg.copy()
             w_cfg['rank'] = i
             w_cfg['path'] = cfg['path'] / str(i)
+            w_cfg['tmp'] = cfg['tmp'] / str(i)
             w_cfg['model'] = cfg['model_mapping'][i]
             w_cfg['architecture'] = FedMD.FedMD_CIFAR.hyper[w_cfg['model']]
             model = FedMD.FedMD_CIFAR(*w_cfg['architecture'],
@@ -432,11 +437,12 @@ def main():
             res = pool.map(FedWorker.init_public, workers)
             [workers, res] = list(zip(*res))
             [acc, loss] = list(zip(*res))
-            wandb.run.summary["init_public/acc"] = np.average(acc)
-            wandb.run.summary["init_public/loss"] = np.average(loss)
-
-            paths = [w.cfg['path'] for w in workers]
-            util.save_models_to_artifact(cfg, workers, (acc,loss), "init_public")
+            acc, loss = np.average(acc), np.average(loss)
+            wandb.run.summary["init_public/acc"] = acc
+            wandb.run.summary["init_public/loss"] = loss
+            if "save_init_public" in cfg['stages']:
+                util.save_models_to_artifact(cfg, workers, "init_public",
+                                             {"acc": acc, "loss": loss})
         elif "load_init_public" in cfg['stages']:
             util.load_models_from_artifact(cfg, workers, "init_public")
 
@@ -445,11 +451,12 @@ def main():
             res = pool.map(FedWorker.init_private, workers)
             [workers, res] = list(zip(*res))
             [acc, loss] = list(zip(*res))
-            wandb.run.summary["init_private/acc"] = np.average(acc)
-            wandb.run.summary["init_private/loss"] = np.average(loss)
-
-            paths = [w.cfg['path'] for w in workers]
-            util.save_models_to_artifact(cfg, workers, (acc,loss), "init_private")
+            acc, loss = np.average(acc), np.average(loss)
+            wandb.run.summary["init_private/acc"] = acc
+            wandb.run.summary["init_private/loss"] = loss
+            if "save_init_private" in cfg['stages']:
+                util.save_models_to_artifact(cfg, workers, "init_private",
+                                             {"acc": acc, "loss": loss})
         elif "load_init_private" in cfg['stages']:
             util.load_models_from_artifact(cfg, workers, "init_private")
 
@@ -518,11 +525,14 @@ def main():
                      "loss": metrics.Loss(nn.CrossEntropyLoss())},
                     device)
                 evaluator.run(private_test_dl)
+                acc = evaluator.state.metrics['acc']
+                loss = evaluator.state.metrics['loss']
+                wandb.log({"acc": np.average(acc), "loss": np.average(loss)})
                 global_model = global_model.cpu()
-                wandb.log(evaluator.state.metrics)
             else:
                 [acc, loss] = list(zip(*res))
-                wandb.log({"acc": np.average(acc), "loss": np.average(loss)})
+                acc, loss = np.average(acc), np.average(loss)
+                wandb.log({"acc": acc, "loss": loss})
 
             if cfg['replace_local_model']:
                 if global_model is None:
@@ -530,6 +540,13 @@ def main():
                 for w in workers:
                     w.model.load_state_dict(global_model.state_dict())
                 print("local models replaced")
+
+        if "save_final" in cfg['stages']:
+            for w in workers:
+                torch.save(w.model.state_dict(), f"{w.cfg['tmp']}/final.pth")
+                torch.save(None, f"{w.cfg['tmp']}/final_optim.pth")
+            util.save_models_to_artifact(cfg, workers, "final",
+                                         {"acc": acc, "loss": loss})
 
         if "upper" in cfg['stages']:
             print("All parties starting with 'upper'")

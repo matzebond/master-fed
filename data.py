@@ -77,11 +77,11 @@ def load_idx_from_artifact(targets, parties, subclasses, samples_per_class, conc
         wandb.log_artifact(idx_artifact)
     try:
         idx_artifact.wait()  # throws execption in offline mode
+        print("party distributions:\n", idx_artifact.metadata['distributions'])
+        print("class total:\n", idx_artifact.metadata['class_total'])
     except Exception as e:
         pass
-    print("party distributions:\n", idx_artifact.metadata['distributions'])
-    print("class total:\n", idx_artifact.metadata['class_total'])
-    return idxs[:parties]
+    return idxs
 
 
 def build_private_dls(private_train_data, private_test_data,

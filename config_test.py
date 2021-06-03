@@ -5,7 +5,7 @@ with open('config_base.py') as f:
     exec(f.read())
 
 cfg.update({
-    'stages': ['init_public', 'init_private', 'collab'],
+    'stages': ['init_public', 'init_private', 'save_init_private', 'collab', 'save_final'],
     'pool_size': 2,
 
     'projection_head': 64,

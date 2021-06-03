@@ -46,8 +46,6 @@ def example_batch(model, batch, classes):
         #plt.imshow(transforms.ToPILImage()(x))
         #plt.show()
 
-
-
 def show_img(data, classes, idx):
     x, y = data[idx]
     print(f'Class: "{classes[y]}"')
@@ -89,18 +87,19 @@ def dataset_split(dataset):
 
 
 
-def save_models_to_artifact(cfg, workers, info, stage):
-    model_artifact = wandb.Artifact(stage, type='model')
+def save_models_to_artifact(cfg, workers, stage, metadata):
+    model_artifact = wandb.Artifact(stage, type='model',
+                                    metadata=metadata)
 
     for rank, worker in enumerate(workers):
-        model_artifact.add_file(f"{worker.cfg['path']}/{stage}.pth",
+        model_artifact.add_file(f"{worker.cfg['tmp']}/{stage}.pth",
                                 f"r{rank}-m{cfg['model_mapping'][rank]}-{stage}.pth")
-        model_artifact.add_file(f"{worker.cfg['path']}/{stage}_optim.pth",
+        model_artifact.add_file(f"{worker.cfg['tmp']}/{stage}_optim.pth",
                                 f"r{rank}-m{cfg['model_mapping'][rank]}-{stage}_optim.pth")
 
     wandb.log_artifact(model_artifact)
     try:
-        idx_artifact.wait()  # throws execption in offline mode
+        model_artifact.wait()  # throws execption in offline mode
         print(f'Model: Save "{stage}" models as version {model_artifact.version}')
     except Exception as e:
         print(f'Model: Save "{stage}" models in offline mode')
@@ -113,14 +112,14 @@ def load_models_from_artifact(cfg, workers, stage, version="latest"):
 
     for rank, worker in enumerate(workers):
         p = Path.cwd() / artifact_path / f"r{rank}-m{cfg['model_mapping'][rank]}-{stage}.pth"
-        (worker.cfg['path'] / f"{stage}.pth").symlink_to(p)
+        (worker.cfg['tmp'] / f"{stage}.pth").symlink_to(p)
 
         p = Path.cwd() / artifact_path / f"r{rank}-m{cfg['model_mapping'][rank]}-{stage}_optim.pth"
-        (worker.cfg['path'] / f"{stage}_optim.pth").symlink_to(p)
+        (worker.cfg['tmp'] / f"{stage}_optim.pth").symlink_to(p)
 
-    # wandb.run.summary["init_public/acc"] = np.average(acc)
-    # wandb.run.summary["init_public/loss"] = np.average(loss)
-    return model_artifact
+    wandb.run.summary[f"{stage}/acc"] = model_artifact.metadata['acc']
+    wandb.run.summary[f"{stage}/loss"] = model_artifact.metadata['loss']
+    return model_artifact, metadata
 
 
 
