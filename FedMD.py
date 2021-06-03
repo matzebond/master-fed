@@ -85,15 +85,18 @@ class FedMD_CIFAR(nn.Module):
 
         if not projection_size:
             self.projection_head = nn.Flatten()
+            output_size = int(np.prod(output_size)
         else:
+            output_size = int(np.prod(output_size)
             self.projection_head = nn.Sequential(
                 nn.Flatten(),
-                nn.Linear(int(np.prod(output_size)), projection_size),
-                nn.ELU(),
+                nn.Linear(output_size, output_size),
+                nn.ReLU(),
+                nn.Linear(output_size, projection_size),
             )
             output_size = projection_size
 
-        self.output = nn.Linear(int(np.prod(output_size)), n_classes, bias = False)
+        self.output = nn.Linear(output_size, n_classes, bias = False)
 
     def forward(self, x, output='logits'):
         x = self.layer1(x)
