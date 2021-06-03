@@ -22,6 +22,7 @@ from ignite.engine import (Engine, Events,
                            create_supervised_trainer,
                            create_supervised_evaluator,
                            _prepare_batch)
+import thop
 
 import FedMD
 from data import load_idx_from_artifact, build_private_dls
@@ -418,6 +419,13 @@ def main():
             args.append((w_cfg, model))
         workers = pool.starmap(FedWorker, args)
         del args
+
+        model = copy.deepcopy(workers[0].model)
+        input = Data.public_train_data[0][0].unsqueeze(0)
+        macs, params = thop.profile(model, inputs=(input, ))
+        print(*thop.clever_format([macs, params], "%.3f"))
+        wandb.config.update({"model": {"macs": macs, "params": params}})
+        del model
 
         if "init_public" in cfg['stages']:
             print("All parties starting with 'init_public'")

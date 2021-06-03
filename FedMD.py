@@ -85,9 +85,9 @@ class FedMD_CIFAR(nn.Module):
 
         if not projection_size:
             self.projection_head = nn.Flatten()
-            output_size = int(np.prod(output_size)
+            output_size = int(np.prod(output_size))
         else:
-            output_size = int(np.prod(output_size)
+            output_size = int(np.prod(output_size))
             self.projection_head = nn.Sequential(
                 nn.Flatten(),
                 nn.Linear(output_size, output_size),

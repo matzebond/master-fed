@@ -3,5 +3,6 @@ torchvision
 pytorch-ignite
 tensorboard
 tensorboard_reducer
+thop
 dill
 wandb
