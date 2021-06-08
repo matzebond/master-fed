@@ -560,17 +560,17 @@ def main():
             alignment_data, avg_logits = None, None
             if cfg['alignment_data'] != "none":
                 if cfg['alignment_data'] == "public":
-                    print(f"Alignment Data: {cfg['num_alignment']} random examples from the public dataset")
+                    print(f"Alignment Data: {cfg['alignment_size']} random examples from the public dataset")
                     alignment_idx = np.random.choice(len(Data.public_train_data),
-                                                     cfg['num_alignment'],
+                                                     cfg['alignment_size'],
                                                      replace = False)
                     alignment_dl = DataLoader(Subset(Data.public_train_data,
                                                      alignment_idx),
-                                              batch_size=cfg['num_alignment'])
+                                              batch_size=cfg['alignment_size'])
                     alignment_data, alignment_labels = next(iter(alignment_dl))
                 elif cfg['alignment_data'] == "random":
-                    print(f"Alignment Data: {cfg['num_alignment']} random noise inputs")
-                    alignment_data = torch.rand([cfg['num_alignment']]
+                    print(f"Alignment Data: {cfg['alignment_size']} random noise inputs")
+                    alignment_data = torch.rand([cfg['alignment_size']]
                                                 + list(Data.private_train_data[0][0].shape))
                 else:
                     raise NotImplementedError(f"alignment_data '{cfg['alignment_data']}' is unknown")

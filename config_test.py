@@ -34,7 +34,7 @@ cfg.update({
     'init_private_epochs': 0,
     'init_private_batch_size': 32,
     'collab_rounds': 5,
-    'num_alignment': 100,
+    'alignment_size': 100,
     'alignment_matching_epochs': 2,
     'alignment_matching_batchsize': 32,
     'alignment_temperature': 1,
