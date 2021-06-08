@@ -27,7 +27,7 @@ import thop
 import FedMD
 from data import load_idx_from_artifact, build_private_dls
 import util
-from nn import (KLDivSoftmaxLoss, avg_params, optim_to, prepare_batch)
+from nn import (KLDivSoftmaxLoss, avg_params, optim_to)
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -296,7 +296,7 @@ class FedWorker:
         def train_alignment(engine, batch):
             self.model.train()
             self.optimizer.zero_grad()
-            x, target, *rest = prepare_batch(batch, device=device)
+            x, target, *rest = util.prepare_batch(batch, device=device)
             local_logits, local_rep = self.model(x, output="both")
             loss = 0
             if self.cfg['alignment_target'] == 'logits' \
@@ -316,22 +316,32 @@ class FedWorker:
         def train_alignment_contrastive(engine, batch):
             self.model.train()
             self.optimizer.zero_grad()
-            x, logits, reps = [x.to(device) for x in batch]
+            x, logits, reps = util.prepare_batch(batch, device=device)
             logits_pred, local_rep = self.model(x, output="both")
-            logits_pred /= self.cfg['alignment_temperature']
-            loss = alignment_loss_fn(logits_pred, logits)
+            # logits_pred /= self.cfg['alignment_temperature']
+            # loss = alignment_loss_fn(logits_pred, logits)
+            loss = 0
 
-            print(local_rep.shape, reps.shape)
-            if self.cfg['alignment_loss'] == 'distillation':
-                # TODO contrastive distillation
-                pass
+            if self.cfg['alignment_loss'] == 'contrastive':
+                num = x.size(0)
+                logits = torch.tensor([], device=device)
+                for i in range(num):
+                    tmp = torch.tile(local_rep[i], (num,1))
+                    cos = F.cosine_similarity(tmp, reps).reshape(1,-1)
+                    logits = torch.cat((logits, cos), dim=0)
+
+                logits /= self.cfg['contrastive_loss_temperature']
+
+                labels = torch.tensor(range(num), device=device, dtype=torch.long)
+                loss_contrastive = F.cross_entropy(logits, labels)
+                loss += self.cfg['contrastive_loss_weight'] * loss_contrastive
 
             loss.backward()
             self.optimizer.step()
             return loss
 
         if self.cfg['alignment_loss'] == "contrastive":
-            alignment_tr = Engine(train_alignment_rep)
+            alignment_tr = Engine(train_alignment_contrastive)
         else:
             alignment_tr = Engine(train_alignment)
 
@@ -368,7 +378,7 @@ class FedWorker:
         def train_collab(engine, batch):
             self.model.train()
             self.optimizer.zero_grad()
-            x, y = prepare_batch(batch, device=device)
+            x, y = util.prepare_batch(batch, device=device)
             y_pred, rep = self.model(x, output='both')
             loss_target = F.cross_entropy(y_pred, y)
             loss = loss_target

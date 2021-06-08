@@ -4,13 +4,14 @@ import torchvision
 from torchvision import datasets, transforms
 from torchvision.transforms import ToTensor, Lambda, Compose
 from tensorboard_reducer import load_tb_events, write_tb_events, reduce_events
+from ignite.utils import convert_tensor
 import matplotlib.pyplot as plt
 import wandb
 from collections import defaultdict
 from pathlib import Path
 import os
 import shutil
-from typing import Union, List
+from typing import List, Callable, Optional, Dict, Sequence, Union, Tuple, Mapping
 
 
 def example(model, data, classes, inst):
@@ -164,3 +165,12 @@ def reduce_tb_events_from_globs(input_globs: List[Union[Path.glob,List[str]]],
     reduced_events = reduce_events(events_dict, reduce_ops)
     write_tb_events(reduced_events, outdir, overwrite)
     # return reduced_events
+
+def prepare_batch(
+        batch: Sequence[torch.Tensor],
+        device: Optional[Union[str, torch.device]] = None,
+        non_blocking: bool = False
+) -> Tuple[Union[torch.Tensor, Sequence, Mapping, str, bytes], ...]:
+    return list(map(
+        lambda x: convert_tensor(x, device=device, non_blocking=non_blocking),
+        batch))
