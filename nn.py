@@ -5,8 +5,9 @@ import torch.nn.functional as F
 from torch.overrides import (
     has_torch_function, has_torch_function_unary, has_torch_function_variadic,
     handle_torch_function)
+from ignite.utils import convert_tensor
 import copy
-from typing import List, Callable, Optional, Dict
+from typing import List, Callable, Optional, Dict, Sequence, Union, Tuple, Mapping
 
 
 def avg_params(models: List[nn.Module]) -> Dict[str, Tensor]:
@@ -50,3 +51,12 @@ class KLDivSoftmaxLoss(nn.modules.loss._WeightedLoss):
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         return F.kl_div(F.softmax(input), target,
                         reduction=self.reduction, log_target=self.log_target)
+
+def prepare_batch(
+        batch: Sequence[torch.Tensor],
+        device: Optional[Union[str, torch.device]] = None,
+        non_blocking: bool = False
+) -> Tuple[Union[torch.Tensor, Sequence, Mapping, str, bytes], ...]:
+    return list(map(
+        lambda x: convert_tensor(x, device=device, non_blocking=non_blocking),
+        batch))

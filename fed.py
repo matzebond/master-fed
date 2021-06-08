@@ -21,14 +21,13 @@ import ignite
 from ignite import metrics
 from ignite.engine import (Engine, Events,
                            create_supervised_trainer,
-                           create_supervised_evaluator,
-                           _prepare_batch)
+                           create_supervised_evaluator)
 import thop
 
 import FedMD
 from data import load_idx_from_artifact, build_private_dls
 import util
-from nn import (KLDivSoftmaxLoss, avg_params, optim_to)
+from nn import (KLDivSoftmaxLoss, avg_params, optim_to, prepare_batch)
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -246,45 +245,117 @@ class FedWorker:
         return res
 
 
-    def get_logits(self, alignment_data):
+    def get_alignment(self, alignment_data):
         self.setup(writer=False)
-        def logit_collect(engine, batch):
+        def collect_alignment(engine, batch):
             self.model.train()
             x = batch[0].to(device)
             with torch.no_grad():
-                logits = self.model(x) / self.cfg['logits_temperature']
-            engine.state.logits = torch.cat((engine.state.logits, logits.cpu()))
+                logits, rep = self.model(x, output="both")
+                if self.cfg['alignment_target'] == 'rep' \
+                   or self.cfg['alignment_target'] == 'both':
+                    if self.cfg['alignment_loss'] == 'KL':
+                        rep = F.softmax(rep)
+                    engine.state.rep = torch.cat((engine.state.rep, rep.cpu()), dim=0)
+                if self.cfg['alignment_target'] == 'logits' \
+                   or self.cfg['alignment_target'] == 'both':
+                    logits = logits / self.cfg['alignment_temperature']
+                    if self.cfg['alignment_loss'] == 'KL':
+                        logits = F.softmax(logits)
+                    engine.state.logits = torch.cat((engine.state.logits, logits.cpu()), dim=0)
 
         alignment_ds = DataLoader(TensorDataset(alignment_data),
-                                  batch_size=self.cfg['logits_matching_batchsize'])
-        logit_collector = Engine(logit_collect)
-        logit_collector.state.logits = torch.tensor([])
-        logit_collector.run(alignment_ds)
+                                  batch_size=self.cfg['alignment_matching_batchsize'])
+        alignment_collector = Engine(collect_alignment)
+        alignment_collector.state.logits = torch.tensor([])
+        alignment_collector.state.rep = torch.tensor([])
+        alignment_collector.run(alignment_ds)
 
         self.teardown()
-        return logit_collector.state.logits
+
+        if self.cfg['alignment_target'] == 'logits':
+            return alignment_collector.state.logits, 
+        elif self.cfg['alignment_target'] == 'rep':
+            return alignment_collector.state.rep, 
+        elif self.cfg['alignment_target'] == 'both':
+            return alignment_collector.state.logits, alignment_collector.state.rep
+        else:
+            raise NotImplementedError(f"alignment_target '{self.cfg['alignment_target']}' is unknown")
+
+
+    def alignment(self, alignment_data, alignment_target):
+        if self.cfg['alignment_loss'] == "MSE":
+            alignment_loss_fn = nn.MSELoss()
+        if self.cfg['alignment_loss'] == "L1":
+            alignment_loss_fn = nn.L1Loss()
+        if self.cfg['alignment_loss'] == "SmoothL1":
+            alignment_loss_fn = nn.SmoothL1Loss()
+        if self.cfg['alignment_loss'] == "KL":
+            alignment_loss_fn = KLDivSoftmaxLoss()
+
+        def train_alignment(engine, batch):
+            self.model.train()
+            self.optimizer.zero_grad()
+            x, target, *rest = prepare_batch(batch, device=device)
+            local_logits, local_rep = self.model(x, output="both")
+            loss = 0
+            if self.cfg['alignment_target'] == 'logits' \
+                or self.cfg['alignment_target'] == 'both':
+                pred = local_logits / self.cfg['alignment_temperature']
+                loss += alignment_loss_fn(pred, target)
+            if self.cfg['alignment_target'] == 'both':
+                [target] = rest
+            if self.cfg['alignment_target'] == 'rep' \
+                or self.cfg['alignment_target'] == 'both':
+                pred = local_rep / self.cfg['alignment_temperature']
+                loss += alignment_loss_fn(pred, target)
+            loss.backward()
+            self.optimizer.step()
+            return loss
+
+        def train_alignment_contrastive(engine, batch):
+            self.model.train()
+            self.optimizer.zero_grad()
+            x, logits, reps = [x.to(device) for x in batch]
+            logits_pred, local_rep = self.model(x, output="both")
+            logits_pred /= self.cfg['alignment_temperature']
+            loss = alignment_loss_fn(logits_pred, logits)
+
+            print(local_rep.shape, reps.shape)
+            if self.cfg['alignment_loss'] == 'distillation':
+                # TODO contrastive distillation
+                pass
+
+            loss.backward()
+            self.optimizer.step()
+            return loss
+
+        if self.cfg['alignment_loss'] == "contrastive":
+            alignment_tr = Engine(train_alignment_rep)
+        else:
+            alignment_tr = Engine(train_alignment)
+
+        if self.cfg['alignment_target'] == 'both':
+            alignment_ds = TensorDataset(alignment_data,
+                                         alignment_target[0], alignment_target[1])
+        else:
+            alignment_ds = TensorDataset(alignment_data, alignment_target)
+        # return train_alignment, 
+        alignment_dl = DataLoader(alignment_ds,
+                                  batch_size=self.cfg['alignment_matching_batchsize'])
+        with alignment_tr.add_event_handler(Events.EPOCH_COMPLETED,
+                                                    self.evaluate,
+                                                    "alignment", self.private_dls):
+            alignment_tr.run(alignment_dl, self.cfg['alignment_matching_epochs'])
+
 
     @self_dec
-    def collab_round(self, alignment_data = None, logits = None, global_model = None):
+    def collab_round(self, alignment_data = None, alignment_target = None,
+                     global_model = None):
         self.setup(self.optim_state)
 
-        if alignment_data != None and logits != None:
-            logit_loss_fn = nn.L1Loss() # KLDivSoftmaxLoss(), nn.MSELoss()
-            def train_logit(engine, batch):
-                self.model.train()
-                self.optimizer.zero_grad()
-                x, y = _prepare_batch(batch, device=device)
-                y_pred = self.model(x) / self.cfg['logits_temperature']
-                loss = logit_loss_fn(y_pred, y)
-                loss.backward()
-                self.optimizer.step()
-                return loss
-            trainer_logit = Engine(train_logit)
-            logit_dl = DataLoader(TensorDataset(alignment_data, logits),
-                                  batch_size=self.cfg['logits_matching_batchsize'])
-            with trainer_logit.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
-                                                 "alignment", self.private_dls):
-                trainer_logit.run(logit_dl, self.cfg['logits_matching_epochs'])
+        if alignment_data != None and alignment_target != None:
+            self.alignment(alignment_data, alignment_target)
 
 
         if global_model:
@@ -297,7 +368,7 @@ class FedWorker:
         def train_collab(engine, batch):
             self.model.train()
             self.optimizer.zero_grad()
-            x, y = _prepare_batch(batch, device=device)
+            x, y = prepare_batch(batch, device=device)
             y_pred, rep = self.model(x, output='both')
             loss_target = F.cross_entropy(y_pred, y)
             loss = loss_target
@@ -320,23 +391,20 @@ class FedWorker:
             loss.backward()
             self.optimizer.step()
             return loss
-        trainer_colab = Engine(train_collab)
+        collab_tr = Engine(train_collab)
 
-        with trainer_colab.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
+        with collab_tr.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "private_training", self.private_dls):
-            trainer_colab.run(self.private_dl, self.cfg['private_training_epochs'])
+            collab_tr.run(self.private_dl, self.cfg['private_training_epochs'])
         
         res = self.coarse_eval(self.private_dls)
 
         self.teardown(save_optimizer=True)
-        if global_model:
-            # global_model = global_model.cpu() # TODO is this needed?
-            pass
         if self.cfg['keep_prev_model']:
-            # self.prev_model = self.prev_model.cpu() # TODO is this needed?
             del self.prev_model
             self.prev_model = copy.deepcopy(self.model)
         return res
+
 
 
 def main():
@@ -346,6 +414,7 @@ def main():
 
     if cfg['variant'] == 'fedmd':
         cfg['global_model'] = 'none'
+        cfg['replace_local_model'] = False
         cfg['keep_prev_model'] = False
         cfg['send_global'] = False
         cfg['contrastive_loss'] = 'none'
@@ -354,12 +423,14 @@ def main():
         cfg['replace_local_model'] = True
         cfg['keep_prev_model'] = False
         cfg['send_global'] = False
+        cfg['alignment_data'] = 'none'
         cfg['contrastive_loss'] = 'none'
     elif cfg['variant'] == 'moon':
         cfg['global_model'] = 'averaging'
         cfg['replace_local_model'] = True
         cfg['keep_prev_model'] = True
         cfg['send_global'] = True
+        cfg['alignment_data'] = 'none'
         cfg['contrastive_loss'] = 'moon'
 
     # wandb.tensorboard.patch(root_logdir="wandb/latest-run/files")
@@ -477,8 +548,8 @@ def main():
         for n in range(cfg['collab_rounds']):
             print(f"All parties starting with collab round [{n+1}/{cfg['collab_rounds']}]")
             alignment_data, avg_logits = None, None
-            if cfg['alignment_mode'] != "none":
-                if cfg['alignment_mode'] == "public":
+            if cfg['alignment_data'] != "none":
+                if cfg['alignment_data'] == "public":
                     print(f"Alignment Data: {cfg['num_alignment']} random examples from the public dataset")
                     alignment_idx = np.random.choice(len(Data.public_train_data),
                                                      cfg['num_alignment'],
@@ -487,26 +558,34 @@ def main():
                                                      alignment_idx),
                                               batch_size=cfg['num_alignment'])
                     alignment_data, alignment_labels = next(iter(alignment_dl))
-                elif cfg['alignment_mode'] == "random":
+                elif cfg['alignment_data'] == "random":
                     print(f"Alignment Data: {cfg['num_alignment']} random noise inputs")
                     alignment_data = torch.rand([cfg['num_alignment']]
                                                 + list(Data.private_train_data[0][0].shape))
                 else:
-                    raise NotImplementedError(f"alignment_mode '{cfg['alignment_mode']}' is unknown")
+                    raise NotImplementedError(f"alignment_data '{cfg['alignment_data']}' is unknown")
 
-                logits = pool.starmap(FedWorker.get_logits,
+                res = pool.starmap(FedWorker.get_alignment,
                                    zip(workers, repeat(alignment_data)))
-                # [workers, logits] = list(zip(*res))
+                alignment_targets, *rest = list(zip(*res))
 
-                avg_logits = torch.zeros_like(logits[0])
-                for l in logits:
-                    avg_logits += l
-                avg_logits /= len(logits)
+                avg_alignment_targets = torch.zeros_like(alignment_targets[0])
+                for t in avg_alignment_targets:
+                    avg_alignment_targets += t.clone()
+                avg_alignment_targets /= len(avg_alignment_targets)
+
+                if cfg['alignment_target'] == "both":
+                    [reps] = rest
+                    avg_reps = torch.zeros_like(reps[0])
+                    for r in reps:
+                        avg_reps += r
+                    avg_reps /= len(reps)
+                    avg_alignment_targets = avg_alignment_targets, avg_reps
 
             res = pool.starmap(FedWorker.collab_round,
                                zip(workers,
                                    repeat(alignment_data),
-                                   repeat(avg_logits),
+                                   repeat(avg_alignment_targets),
                                    repeat(global_model if cfg['send_global'] else None)))
             [workers, res] = list(zip(*res))
 

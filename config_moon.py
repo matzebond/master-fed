@@ -19,7 +19,6 @@ cfg.update({
     'init_private_epochs': 0,
     'init_private_batch_size': 32,
     'collab_rounds': 100,
-    'alignment_mode': 'none',
     'logits_matching_epochs': 0,
     'private_training_epochs': 5,
     'contrastive_loss_weight': 5,
