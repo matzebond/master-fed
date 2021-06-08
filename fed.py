@@ -580,8 +580,8 @@ def main():
                 alignment_targets, *rest = list(zip(*res))
 
                 avg_alignment_targets = torch.zeros_like(alignment_targets[0])
-                for t in avg_alignment_targets:
-                    avg_alignment_targets += t.clone()
+                for t in alignment_targets:
+                    avg_alignment_targets += t
                 avg_alignment_targets /= len(alignment_targets)
 
                 if cfg['alignment_target'] == "both":
