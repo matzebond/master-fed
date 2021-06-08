@@ -582,7 +582,7 @@ def main():
                 avg_alignment_targets = torch.zeros_like(alignment_targets[0])
                 for t in avg_alignment_targets:
                     avg_alignment_targets += t.clone()
-                avg_alignment_targets /= len(avg_alignment_targets)
+                avg_alignment_targets /= len(alignment_targets)
 
                 if cfg['alignment_target'] == "both":
                     [reps] = rest
