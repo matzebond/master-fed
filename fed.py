@@ -442,6 +442,12 @@ def main():
         cfg['send_global'] = True
         cfg['alignment_data'] = 'none'
         cfg['contrastive_loss'] = 'moon'
+    elif cfg['variant'] == 'fedcon':
+        cfg['global_model'] = 'none'
+        cfg['replace_local_model'] = False
+        cfg['keep_prev_model'] = False
+        cfg['send_global'] = False
+        cfg['contrastive_loss'] = 'none'
 
     # wandb.tensorboard.patch(root_logdir="wandb/latest-run/files")
     wandb.init(project='master-fed', entity='maschm',
