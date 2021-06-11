@@ -1,5 +1,6 @@
 import functools
 from itertools import repeat
+from collections import defaultdict
 import logging
 import copy
 import os
@@ -42,14 +43,18 @@ def log_training(engine):
     print(f"Epoch {e}/{n}: {i} - batch loss: {batch_loss:.4f}")
 
 
-def init_pool_process(partial_dls, combined_dl, test_dl, p_train_dl, p_test_dl):
-    global private_partial_dls, private_combined_dl, private_test_dl
-    private_partial_dls = dill.loads(partial_dls)
-    private_combined_dl = dill.loads(combined_dl)
-    private_test_dl = dill.loads(test_dl)
+def init_pool_process(priv_dls, priv_test_dl,
+                      combi_dl, combi_test_dl,
+                      pub_train_dl, pub_test_dl):
+    global private_dls, private_test_dls
+    private_dls = dill.loads(priv_dls)
+    private_test_dls = dill.loads(priv_test_dl)
+    global combined_dl, combined_test_dl
+    combined_dl = dill.loads(combi_dl)
+    combined_test_dl = dill.loads(combi_test_dl)
     global public_train_dl, public_test_dl
-    public_train_dl = dill.loads(p_train_dl)
-    public_test_dl = dill.loads(p_test_dl)
+    public_train_dl = dill.loads(pub_train_dl)
+    public_test_dl = dill.loads(pub_test_dl)
 
 
 def self_dec(func):
@@ -97,11 +102,13 @@ class FedWorker:
             device)
 
 
-        self.private_dl = private_partial_dls[self.cfg['rank']]
+        self.private_dl = private_dls[self.cfg['rank']]
+        self.private_test_dl = private_test_dls[self.cfg['rank']]
         self.public_dls  = {"public_train": public_train_dl,
                             "public_test": public_test_dl}
         self.private_dls = {"private_train": self.private_dl,
-                            "private_test": private_test_dl}
+                            "private_test": self.private_test_dl,
+                            "combined_test": combined_test_dl}
 
         self.writer = SummaryWriter(self.cfg['path']) if writer else None
 
@@ -111,7 +118,7 @@ class FedWorker:
             self.optim_state = optim_to(self.optimizer, "cpu").state_dict()
 
         del self.optimizer, self.trainer, self.evaluator
-        del self.private_dl, self.public_dls, self.private_dls
+        del self.private_dl, self.private_test_dl, self.public_dls, self.private_dls
         del self.writer
 
         self.model = self.model.cpu()
@@ -134,15 +141,19 @@ class FedWorker:
         if trainer:
             print(f"{stage} [{trainer.state.epoch:2d}/{trainer.state.max_epochs:2d}]")
 
+        res = {}
         for name, dl in dls.items():
             title = f"{stage}/{name}" if add_stage else name
             with self.evaluator.add_event_handler(Events.COMPLETED,
                                                   self.log_metrics, title):
                 self.evaluator.run(dl)
+                res[f"{title}/acc"] = self.evaluator.state.metrics['acc']
+                res[f"{title}/loss"] = self.evaluator.state.metrics['loss']
         if advance:
             self.gstep += 1
-
-        return self.evaluator.state.metrics['acc'], self.evaluator.state.metrics['loss']
+        if trainer:
+            trainer.state.eval_res = res
+        return res
 
 
     def coarse_eval(self, dls):
@@ -317,10 +328,11 @@ class FedWorker:
             self.model.train()
             self.optimizer.zero_grad()
             x, logits, reps = util.prepare_batch(batch, device=device)
-            logits_pred, local_rep = self.model(x, output="both")
-            # logits_pred /= self.cfg['alignment_temperature']
-            # loss = alignment_loss_fn(logits_pred, logits)
+            local_logits, local_rep = self.model(x, output="both")
+            local_logits = local_logits / self.cfg['alignment_temperature']
+
             loss = 0
+            loss += F.mse_loss(local_logits, logits)
 
             if self.cfg['alignment_loss'] == 'contrastive':
                 num = x.size(0)
@@ -451,32 +463,31 @@ def main():
 
     # wandb.tensorboard.patch(root_logdir="wandb/latest-run/files")
     wandb.init(project='master-fed', entity='maschm',
-               # group=cfg['group'], job_type="master", name=cfg['group'],
                config=cfg, config_exclude_keys=cfg['ignore'],
                sync_tensorboard=True)
-    # wandb.save("./*/*", wandb.run.dir, 'end')
+    # wandb.save("./*/*event*", policy = 'end')
     cfg['path'] = Path(wandb.run.dir)
     cfg['tmp'] = Path("./wandb/tmp/")
     shutil.rmtree(cfg['tmp'], ignore_errors=True)
+
+    # wandb.tensorboard.patch(root_logdir=cfg['path']/"files")
 
     if cfg['dataset'] == 'CIFAR100' or cfg['dataset'] == 'CIFAR':
         import CIFAR as Data
     else:
         raise NotImplementedError(f"dataset '{cfg['dataset']}' is unknown")
 
-    private_partial_idxs = load_idx_from_artifact(
+    private_idxs, private_test_idxs = load_idx_from_artifact(
+        cfg,
         np.array(Data.private_train_data.targets),
-        cfg['parties'],
-        cfg['subclasses'],
-        cfg['samples_per_class'],
-        cfg['concentration']
+        np.array(Data.private_test_data.targets),
     )
-    private_partial_dls, private_combined_dl, private_test_dl = build_private_dls(
+    private_dls, private_test_dls, combined_dl, combined_test_dl = build_private_dls(
         Data.private_train_data,
         Data.private_test_data,
+        private_idxs, private_test_idxs,
         10,
         cfg['subclasses'],
-        private_partial_idxs,
         cfg['init_private_batch_size']
     )
     public_train_dl = DataLoader(Data.public_train_data,
@@ -491,9 +502,10 @@ def main():
     print("all classes: ", combined_class_names)
 
     with Pool(cfg['pool_size'], init_pool_process,
-              [dill.dumps(private_partial_dls),
-               dill.dumps(private_combined_dl),
-               dill.dumps(private_test_dl),
+              [dill.dumps(private_dls),
+               dill.dumps(private_test_dls),
+               dill.dumps(combined_dl),
+               dill.dumps(combined_test_dl),
                dill.dumps(public_train_dl),
                dill.dumps(public_test_dl)]) as pool:
         args = []
@@ -552,8 +564,15 @@ def main():
             print("All parties starting with 'collab'")
             res = pool.map(FedWorker.start_collab, workers)
             [workers, res] = list(zip(*res))
-            [acc, loss] = list(zip(*res))
-            wandb.log({"acc": np.average(acc), "loss": np.average(loss)})
+
+            metrics = defaultdict(int)
+            for d in res:
+                for k in d:
+                    metrics[k] += d[k]
+            for k in metrics:
+                metrics[k] /= len(res)
+
+            wandb.log(metrics)
         else:
             return
 
@@ -604,6 +623,14 @@ def main():
                                    repeat(avg_alignment_targets),
                                    repeat(global_model if cfg['send_global'] else None)))
             [workers, res] = list(zip(*res))
+            metrics = defaultdict(int)
+            for d in res:
+                for k in d:
+                    metrics[k] += d[k]
+            for k in metrics:
+                metrics[k] /= len(res)
+
+            # wandb.log(metrics)
 
             if cfg['global_model'] == 'averaging':
                 global_weights = avg_params([w.model for w in workers])
@@ -619,16 +646,16 @@ def main():
                     {"acc": metrics.Accuracy(),
                      "loss": metrics.Loss(nn.CrossEntropyLoss())},
                     device)
-                evaluator.run(private_test_dl)
-                acc = evaluator.state.metrics['acc']
-                loss = evaluator.state.metrics['loss']
-                wandb.log({"acc": np.average(acc), "loss": np.average(loss)})
+                evaluator.run(combined_test_dl)
+                metrics.update({"global/acc": evaluator.state.metrics['acc'],
+                                "global/loss": evaluator.state.metrics['loss']})
                 global_model = global_model.cpu()
             else:
-                [acc, loss] = list(zip(*res))
-                acc, loss = np.average(acc), np.average(loss)
-                wandb.log({"acc": acc, "loss": loss})
+                metrics.update({"global/acc": metrics['coarse/private_test/acc'],
+                                "global/loss": metrics['coarse/private_test/loss']})
+            wandb.log(metrics)
 
+            # TODO should this go to the start of the loop?
             if cfg['replace_local_model']:
                 if global_model is None:
                     raise Execption("Global model is None. Can't replace local models")
