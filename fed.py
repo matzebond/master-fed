@@ -19,7 +19,6 @@ import torch.multiprocessing as mp
 from torch.multiprocessing import Pool
 # from multiprocessing.pool import Pool
 import ignite
-from ignite import metrics
 from ignite.engine import (Engine, Events,
                            create_supervised_trainer,
                            create_supervised_evaluator)
@@ -97,8 +96,8 @@ class FedWorker:
         )
         self.evaluator = create_supervised_evaluator(
             self.model,
-            {"acc": metrics.Accuracy(),
-             "loss": metrics.Loss(nn.CrossEntropyLoss())},
+            {"acc": ignite.metrics.Accuracy(),
+             "loss": ignite.metrics.Loss(nn.CrossEntropyLoss())},
             device)
 
 
@@ -568,7 +567,8 @@ def main():
             metrics = defaultdict(int)
             for d in res:
                 for k in d:
-                    metrics[k] += d[k]
+                    live = k.replace("coarse", "live")
+                    metrics[live] += d[k]
             for k in metrics:
                 metrics[k] /= len(res)
 
@@ -626,7 +626,8 @@ def main():
             metrics = defaultdict(int)
             for d in res:
                 for k in d:
-                    metrics[k] += d[k]
+                    live = k.replace("coarse", "live")
+                    metrics[live] += d[k]
             for k in metrics:
                 metrics[k] /= len(res)
 
@@ -643,16 +644,16 @@ def main():
             if cfg['global_model'] != 'none':
                 evaluator = create_supervised_evaluator(
                     global_model.to(device),
-                    {"acc": metrics.Accuracy(),
-                     "loss": metrics.Loss(nn.CrossEntropyLoss())},
+                    {"acc": ignite.metrics.Accuracy(),
+                     "loss": ignite.metrics.Loss(nn.CrossEntropyLoss())},
                     device)
                 evaluator.run(combined_test_dl)
                 metrics.update({"global/acc": evaluator.state.metrics['acc'],
                                 "global/loss": evaluator.state.metrics['loss']})
                 global_model = global_model.cpu()
             else:
-                metrics.update({"global/acc": metrics['coarse/private_test/acc'],
-                                "global/loss": metrics['coarse/private_test/loss']})
+                metrics.update({"global/acc": metrics['live/private_test/acc'],
+                                "global/loss": metrics['live/private_test/loss']})
             wandb.log(metrics)
 
             # TODO should this go to the start of the loop?
