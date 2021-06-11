@@ -217,7 +217,7 @@ class FedWorker:
             else:
                 epochs = self.cfg['init_private_epochs'] \
                     + self.cfg['collab_rounds'] * self.cfg['private_training_epochs']
-            self.trainer.run(private_combined_dl, epochs)
+            self.trainer.run(combined_dl, epochs)
 
         res = self.evaluator.state.metrics['acc'], self.evaluator.state.metrics['loss']
         self.teardown()
