@@ -582,7 +582,7 @@ def main():
 
         for n in range(cfg['collab_rounds']):
             print(f"All parties starting with collab round [{n+1}/{cfg['collab_rounds']}]")
-            alignment_data, avg_logits = None, None
+            alignment_data, avg_alignment_targets = None, None
             if cfg['alignment_data'] != "none":
                 if cfg['alignment_data'] == "public":
                     print(f"Alignment Data: {cfg['alignment_size']} random examples from the public dataset")
