@@ -87,10 +87,10 @@ def save_idx_to_artifact(cfg, idxs, num_samples, test_idxs):
                                         'concentration': cfg['concentration'],
                                         'distributions': num_samples,
                                         'class_total': num_samples.sum(axis=0)})
-    with idx_artifact.new_file('train_idxs.npy', 'xb') as f:
+    with idx_artifact.new_file('idxs.npy', 'xb') as f:
         np.save(f, idxs)
     with idx_artifact.new_file('test_idxs.npy', 'xb') as f:
-        np.save(f, idxs)
+        np.save(f, test_idxs)
     wandb.log_artifact(idx_artifact)
     return idx_artifact
 
@@ -101,7 +101,7 @@ def load_idx_from_artifact(cfg, targets, test_targets):
         idx_artifact = wandb.use_artifact(f"{idx_artifact_name}:latest",
                                           type='private_indices')
         # artifact_dir = idx_artifact.download()
-        idx_file = idx_artifact.get_path('train_idxs.npy').download()
+        idx_file = idx_artifact.get_path('idxs.npy').download()
         idxs = np.load(idx_file)
         test_idx_file = idx_artifact.get_path('test_idxs.npy').download()
         test_idxs = np.load(test_idx_file)
