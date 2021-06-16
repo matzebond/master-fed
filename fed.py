@@ -650,8 +650,8 @@ def fed_main(cfg):
             metrics = defaultdict(int)
             for d in res:
                 for k in d:
-                    live = k.replace("coarse", "live")
-                    metrics[live] += d[k]
+                    local = k.replace("coarse", "local")
+                    metrics[local] += d[k]
             for k in metrics:
                 metrics[k] /= len(res)
 
@@ -709,13 +709,12 @@ def fed_main(cfg):
             metrics = defaultdict(int)
             for d in res:
                 for k in d:
-                    live = k.replace("coarse", "live")
-                    metrics[live] += d[k]
+                    local = k.replace("coarse", "local")
+                    metrics[local] += d[k]
             for k in metrics:
                 metrics[k] /= len(res)
 
-            # wandb.log(metrics)
-
+            # update global model
             if cfg['global_model'] == 'averaging':
                 global_weights = avg_params([w.model for w in workers])
                 global_model.load_state_dict(global_weights)
@@ -732,12 +731,12 @@ def fed_main(cfg):
                      "loss": ignite.metrics.Loss(nn.CrossEntropyLoss())},
                     device)
                 evaluator.run(combined_test_dl)
-                metrics.update({"global/acc": evaluator.state.metrics['acc'],
-                                "global/loss": evaluator.state.metrics['loss']})
+                metrics.update({"global/combined_test/acc": evaluator.state.metrics['acc'],
+                                "global/combined_test/loss": evaluator.state.metrics['loss']})
                 global_model = global_model.cpu()
             else:
-                metrics.update({"global/acc": metrics['live/private_test/acc'],
-                                "global/loss": metrics['live/private_test/loss']})
+                metrics.update({"global/combined_test/acc": metrics['local/combined_test/acc'],
+                                "global/combined_test/loss": metrics['local/combined_test/loss']})
             wandb.log(metrics)
 
             # TODO should this go to the start of the loop?
