@@ -419,77 +419,73 @@ class FedWorker:
         def train_alignment(engine, batch):
             self.model.train()
             self.optimizer.zero_grad()
-            x, target, *rest = util.prepare_batch(batch, device=device)
+            x, target_logits, *rest = util.prepare_batch(batch, device=device)
             local_logits, local_rep = self.model(x, output="both")
             loss = 0
-            if self.cfg['alignment_target'] == 'logits' \
-                or self.cfg['alignment_target'] == 'both':
-                pred = local_logits / self.cfg['alignment_temperature']
-                loss += alignment_loss_fn(pred, target)
-            if self.cfg['alignment_target'] == 'both':
-                [target] = rest
-            if self.cfg['alignment_target'] == 'rep' \
-                or self.cfg['alignment_target'] == 'both':
-                pred = local_rep / self.cfg['alignment_temperature']
-                loss += alignment_loss_fn(pred, target)
-            loss.backward()
-            self.optimizer.step()
-            return loss
 
-        def train_alignment_contrastive(engine, batch):
-            self.model.train()
-            self.optimizer.zero_grad()
-            x, logits, reps = util.prepare_batch(batch, device=device)
-            local_logits, local_rep = self.model(x, output="both")
-            local_logits = local_logits / self.cfg['alignment_temperature']
+            if self.cfg['alignment_contrastive_loss'] and \
+               self.cfg['alignment_contrastive_loss'].startswith('contrastive'):
+                [reps] = rest
 
-            loss = 0
-            loss += F.mse_loss(local_logits, logits)
-
-            if self.cfg['alignment_loss'] == 'contrastive':
                 num = x.size(0)
-                logits = torch.tensor([], device=device)
+                cos_dists = torch.tensor([], device=device)
                 for i in range(num):
                     tmp = torch.tile(local_rep[i], (num,1))
                     cos = F.cosine_similarity(tmp, reps).reshape(1,-1)
-                    logits = torch.cat((logits, cos), dim=0)
+                    cos_dists = torch.cat((cos_dists, cos), dim=0)
 
-                logits /= self.cfg['contrastive_loss_temperature']
+                cos_dists /= self.cfg['contrastive_loss_temperature']
 
                 labels = torch.tensor(range(num), device=device, dtype=torch.long)
-                loss_contrastive = F.cross_entropy(logits, labels)
+                loss_contrastive = F.cross_entropy(cos_dists, labels)
                 loss += self.cfg['contrastive_loss_weight'] * loss_contrastive
 
+
+                if self.cfg['alignment_contrastive_loss'].endswith('+distillation'):
+                    local_logits = local_logits / self.cfg['alignment_temperature']
+                    loss += alignment_loss_fn(local_logits, target_logits)
+
+            else:
+                if self.cfg['alignment_target'] == 'logits' \
+                    or self.cfg['alignment_target'] == 'both':
+                    local_logits = local_logits / self.cfg['alignment_temperature']
+                    loss += alignment_loss_fn(local_logits, target_logits)
+                if self.cfg['alignment_target'] == 'both':
+                    [target_rep] = rest
+                if self.cfg['alignment_target'] == 'rep' \
+                    or self.cfg['alignment_target'] == 'both':
+                    local_rep = local_rep / self.cfg['alignment_temperature']
+                    loss += alignment_loss_fn(local_rep, target_rep)
             loss.backward()
             self.optimizer.step()
             return loss
 
-        if self.cfg['alignment_loss'] == "contrastive":
-            alignment_tr = Engine(train_alignment_contrastive)
-        else:
-            alignment_tr = Engine(train_alignment)
+        alignment_tr = Engine(train_alignment)
 
         if self.cfg['alignment_target'] == 'both':
             alignment_ds = TensorDataset(alignment_data,
-                                         alignment_target[0], alignment_target[1])
+                                         alignment_targets[0], alignment_targets[1])
         else:
-            alignment_ds = TensorDataset(alignment_data, alignment_target)
+            alignment_ds = TensorDataset(alignment_data, alignment_targets)
         # return train_alignment, 
-        alignment_dl = DataLoader(alignment_ds,
-                                  batch_size=self.cfg['alignment_matching_batchsize'])
-        with alignment_tr.add_event_handler(Events.EPOCH_COMPLETED,
-                                                    self.evaluate,
-                                                    "alignment", self.private_dls):
-            alignment_tr.run(alignment_dl, self.cfg['alignment_matching_epochs'])
+
+        return alignment_tr, alignment_ds
 
 
     @self_dec
-    def collab_round(self, alignment_data = None, alignment_target = None,
+    def collab_round(self, alignment_data = None, alignment_targets = None,
                      global_model = None):
         self.setup(self.optim_state)
 
-        if alignment_data != None and alignment_target != None:
-            self.alignment(alignment_data, alignment_target)
+        if alignment_data != None and alignment_targets != None:
+            alignment_tr, alignment_ds = self.alignment_prep(alignment_data,
+                                                             alignment_targets)
+            alignment_dl = DataLoader(alignment_ds, shuffle=True,
+                                      batch_size=self.cfg['alignment_matching_batch_size'])
+            with alignment_tr.add_event_handler(Events.EPOCH_COMPLETED,
+                                                        self.evaluate,
+                                                        "alignment", self.private_dls):
+                alignment_tr.run(alignment_dl, self.cfg['alignment_matching_epochs'])
 
 
         if global_model:
@@ -503,21 +499,23 @@ class FedWorker:
             self.model.train()
             self.optimizer.zero_grad()
             x, y = util.prepare_batch(batch, device=device)
-            y_pred, rep = self.model(x, output='both')
-            loss_target = F.cross_entropy(y_pred, y)
-            loss = loss_target
+            local_logits, local_rep = self.model(x, output='both')
+            loss = 0
+
+            loss_target = F.cross_entropy(local_logits, y)
+            loss += loss_target
 
             if self.cfg['contrastive_loss'] == 'moon' and self.prev_model:
-                rep_global = global_model(x, output='rep_only')
-                rep_prev = self.prev_model(x, output='rep_only')
+                global_rep = global_model(x, output='rep_only')
+                prev_rep = self.prev_model(x, output='rep_only')
 
-                pos = F.cosine_similarity(rep, rep_global).reshape(-1,1)
-                neg = F.cosine_similarity(rep, rep_prev).reshape(-1,1)
+                pos = F.cosine_similarity(local_rep, global_rep, dim=-1).reshape(-1,1)
+                neg = F.cosine_similarity(local_rep, prev_rep).reshape(-1,1)
 
                 logits = torch.cat((pos, neg), dim=1)
                 logits /= self.cfg['contrastive_loss_temperature']
 
-                # first "class" sim(rep_global) is the ground truth
+                # first "class" sim(global_rep) is the ground truth
                 labels = torch.zeros(x.size(0), device=device).long()
                 loss_moon = F.cross_entropy(logits, labels)
                 loss += self.cfg['contrastive_loss_weight'] * loss_moon
