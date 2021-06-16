@@ -1,12 +1,15 @@
+#!/usr/bin/env python
+
 import functools
 from itertools import repeat
 from collections import defaultdict
 import logging
 import copy
 import os
+import sys
 from pathlib import Path
 import shutil
-
+import argparse
 import dill
 import wandb
 import numpy as np
@@ -30,16 +33,118 @@ import util
 from nn import (KLDivSoftmaxLoss, avg_params, optim_to)
 
 
-device = "cuda" if torch.cuda.is_available() else "cpu"
-print(f"Using device: {device}")
+def build_parser():
+    parser = argparse.ArgumentParser(
+        usage='%(prog)s [path/default_config_file.py] [options]'
+    )
+
+    # parser.add_argument('config_file', default='config_test.py',
+    #                     help='the file from where to load the defaults')
+
+    base = parser.add_argument_group('basic')
+    base.add_argument('--parties', default=2, type=int, metavar='NUM',
+                      help='number of parties participating in the collaborative training')
+    base.add_argument('--collab_rounds', default=5, type=int, metavar='NUM',
+                      help='number of round in the collaboration phase')
+    base.add_argument('--stages', nargs='*',
+                      default=['init_public', 'init_private', 'collab', 'upper', 'lower'],
+                      choices=['init_public', 'load_init_public', 'init_private', 'load_init_private', 'collab', 'upper', 'lower'],
+                      help='list of phases that are executed (default: %(default)s)')
+
+    # model
+    model = parser.add_argument_group('model')
+    model.add_argument('--model_variant', default='FedMD_CIFAR', choices=['FedMD_CIFAR'],
+                       help='')
+    model.add_argument('--model_mapping', nargs='*', type=int,
+                       help='')
+    model.add_argument('--projection_head', nargs='*', default=None, type=int,
+                       metavar='LAYER_SIZE',
+                       help='size of the projection head')
+
+    # data
+    data = parser.add_argument_group('data')
+    data.add_argument('--dataset', default='CIFAR100', choices=['CIFAR100'],
+                      help='')
+    data.add_argument('--subclasses', nargs='*', default=[0,2,20,63,71,82], type=int,
+                      metavar='CLASS',
+                      help='subset of all classes that are considered for the private and collaborative training')
+    data.add_argument('--concentration', default=1, type=float, metavar='BETA',
+                      help='parameter of the dirichlet distribution used to produce a non-iid data distribution for the private data, a higher values will produce more iid distributions')
+    data.add_argument('--samples_per_class', default=20, type=int, metavar='SAMPLES',
+                      help='per class samples chosen from the training dataset\
+                            for non-iid data this is the average samples per class')
+
+    # training
+    training = parser.add_argument_group('training')
+    training.add_argument('--private_training_epochs', default=5, type=int, metavar='EPOCHS',
+                          help='number of training epochs on the private data per collaborative round')
+    # training.add_argument('--private_training_batch_size', default=5) # TODO not supported
+    training.add_argument('--optim', default='Adam')
+    training.add_argument('--init_public_lr', default=0.0001, type=float, metavar='LR',
+                          help='learning rate (used for every training optimizer)')
+    training.add_argument('--init_public_epochs', default=0, type=int, metavar='EPOCHS',
+                          help='number of training epochs on the public data in the initial public training stage')
+    training.add_argument('--init_public_batch_size', default=32, type=int,
+                          metavar='BATCHSIZE',
+                          help='size of the mini-batches in the initial public training')
+    training.add_argument('--init_private_epochs', default=0, type=int,
+                          metavar='EPOCHS',
+                          help='number of training epochs on the private data in the initial private training stage')
+    training.add_argument('--init_private_batch_size', default=32, type=int,
+                          metavar='BATCHSIZE',
+                          help='size of the mini-batches in the initial private training')
+    training.add_argument('--upper_bound_epochs', default=50, type=int, metavar='EPOCHS')
+    training.add_argument('--lower_bound_epochs', default=50, type=int, metavar='EPOCHS')
+
+    # variant
+    variant = parser.add_argument_group('variant')
+    variant.add_argument('--variant', default=None,
+                         choices=['fedmd', 'fedavg', 'moon', 'fedcon'],
+                         help='algorithm to use for the collaborative training, fixes some of the parameters in the \'variant\' group')
+    variant.add_argument('--keep_prev_model', action='store_true',
+                         help='parties keep the previous model (used for MOON contrastive loss)')
+    variant.add_argument('--global_model', choices=['averaging', 'distillation'],
+                         help='build a global model by the specified method')
+    variant.add_argument('--replace_local_model', action='store_true',
+                         help='replace the local model of the parties by the global model')
+    variant.add_argument('--send_global', action='store_true',
+                         help='send the global model to the parties')
+    variant.add_argument('--contrastive_loss', default='none', choices=['none', 'moon'],
+                         help='contrastive loss for the collaborative training')
+    variant.add_argument('--contrastive_loss_weight', type=int,
+                         metavar='WEIGHT')
+    variant.add_argument('--contrastive_loss_temperature', type=int,
+                         metavar='TEMP')
+    variant.add_argument('--alignment_data', choices=['public', 'random'],
+                         help='data to use for the alignment step')
+    variant.add_argument('--alignment_target', choices=['logits', 'rep', 'both'],
+                         help='target to use for the alignment step')
+    variant.add_argument('--alignment_distillation_loss',
+                         choices=['MSE', 'L1', 'SmoothL1', 'KL'],
+                         help='loss to align the alignment target on the alignment data')
+    variant.add_argument('--alignment_contrastive_loss',
+                         choices=['contrastive', 'constrastive+distillation'],
+                         help='contrastive loss to align the alignment target on the alignment data')
+    variant.add_argument('--alignment_size', type=int, metavar='SIZE',
+                         help='amount of instances to pick from the data for the alignment')
+    variant.add_argument('--alignment_matching_epochs', type=int,
+                         metavar='EPOCHS',
+                         help='number of training epoch on the alignment data per collaborative round')
+    variant.add_argument('--alignment_matching_batch_size', type=int, metavar='BATCHSIZE',
+                         help='size of the mini-batches in the alignment')
+    variant.add_argument('--alignment_temperature', type=int, metavar='TEMP',
+                         help='temperature  alignment')
+
+    # util
+    util = parser.add_argument_group('etc')
+    util.add_argument('--pool_size', default=1, type=int, metavar='SIZE',
+                      help='number of processes')
+    util.add_argument('--ignore', nargs='*', metavar='KEY',
+                      default=['ignore', 'rank', 'model', 'path', 'tmp'],
+                      help='keys ignored my wandb')
 
 
-def log_training(engine):
-    batch_loss = engine.state.output
-    e = engine.state.epoch
-    n = engine.state.max_epochs
-    i = engine.state.iteration
-    print(f"Epoch {e}/{n}: {i} - batch loss: {batch_loss:.4f}")
+    return parser
 
 
 def init_pool_process(priv_dls, priv_test_dl,
@@ -55,7 +160,14 @@ def init_pool_process(priv_dls, priv_test_dl,
     public_train_dl = dill.loads(pub_train_dl)
     public_test_dl = dill.loads(pub_test_dl)
 
+    global device
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Using device: {device}")
 
+
+# A hacky decorator that makes a (class) function return
+# self and the result of the function, so that the class works
+# when called multiple times in a multiprocessing.Pool
 def self_dec(func):
     @functools.wraps(func)
     def inner(self, *args, **kwds):
@@ -264,18 +376,18 @@ class FedWorker:
                 logits, rep = self.model(x, output="both")
                 if self.cfg['alignment_target'] == 'rep' \
                    or self.cfg['alignment_target'] == 'both':
-                    if self.cfg['alignment_loss'] == 'KL':
+                    if self.cfg['alignment_distillation_loss'] == 'KL':
                         rep = F.softmax(rep)
                     engine.state.rep = torch.cat((engine.state.rep, rep.cpu()), dim=0)
                 if self.cfg['alignment_target'] == 'logits' \
                    or self.cfg['alignment_target'] == 'both':
                     logits = logits / self.cfg['alignment_temperature']
-                    if self.cfg['alignment_loss'] == 'KL':
+                    if self.cfg['alignment_distillation_loss'] == 'KL':
                         logits = F.softmax(logits)
                     engine.state.logits = torch.cat((engine.state.logits, logits.cpu()), dim=0)
 
         alignment_ds = DataLoader(TensorDataset(alignment_data),
-                                  batch_size=self.cfg['alignment_matching_batchsize'])
+                                  batch_size=self.cfg['alignment_matching_batch_size'])
         alignment_collector = Engine(collect_alignment)
         alignment_collector.state.logits = torch.tensor([])
         alignment_collector.state.rep = torch.tensor([])
@@ -293,14 +405,15 @@ class FedWorker:
             raise NotImplementedError(f"alignment_target '{self.cfg['alignment_target']}' is unknown")
 
 
-    def alignment(self, alignment_data, alignment_target):
-        if self.cfg['alignment_loss'] == "MSE":
+    def alignment_prep(self, alignment_data, alignment_targets):
+        alignment_loss_fn = None
+        if self.cfg['alignment_distillation_loss'] == "MSE":
             alignment_loss_fn = nn.MSELoss()
-        if self.cfg['alignment_loss'] == "L1":
+        if self.cfg['alignment_distillation_loss'] == "L1":
             alignment_loss_fn = nn.L1Loss()
-        if self.cfg['alignment_loss'] == "SmoothL1":
+        if self.cfg['alignment_distillation_loss'] == "SmoothL1":
             alignment_loss_fn = nn.SmoothL1Loss()
-        if self.cfg['alignment_loss'] == "KL":
+        if self.cfg['alignment_distillation_loss'] == "KL":
             alignment_loss_fn = KLDivSoftmaxLoss()
 
         def train_alignment(engine, batch):
@@ -428,38 +541,8 @@ class FedWorker:
 
 
 
-def main():
-    global cfg
-    with open('config_test.py') as f:
-        exec(f.read())
 
-    if cfg['variant'] == 'fedmd':
-        cfg['global_model'] = 'none'
-        cfg['replace_local_model'] = False
-        cfg['keep_prev_model'] = False
-        cfg['send_global'] = False
-        cfg['contrastive_loss'] = 'none'
-    elif cfg['variant'] == 'fedavg':
-        cfg['global_model'] = 'averaging'
-        cfg['replace_local_model'] = True
-        cfg['keep_prev_model'] = False
-        cfg['send_global'] = False
-        cfg['alignment_data'] = 'none'
-        cfg['contrastive_loss'] = 'none'
-    elif cfg['variant'] == 'moon':
-        cfg['global_model'] = 'averaging'
-        cfg['replace_local_model'] = True
-        cfg['keep_prev_model'] = True
-        cfg['send_global'] = True
-        cfg['alignment_data'] = 'none'
-        cfg['contrastive_loss'] = 'moon'
-    elif cfg['variant'] == 'fedcon':
-        cfg['global_model'] = 'none'
-        cfg['replace_local_model'] = False
-        cfg['keep_prev_model'] = False
-        cfg['send_global'] = False
-        cfg['contrastive_loss'] = 'none'
-
+def fed_main(cfg):
     # wandb.tensorboard.patch(root_logdir="wandb/latest-run/files")
     wandb.init(project='master-fed', entity='maschm',
                config=cfg, config_exclude_keys=cfg['ignore'],
@@ -577,13 +660,13 @@ def main():
             return
 
         global_model = None
-        if cfg['global_model'] != 'none':
+        if cfg['global_model']:
             global_model = copy.deepcopy(workers[0].model)
 
         for n in range(cfg['collab_rounds']):
             print(f"All parties starting with collab round [{n+1}/{cfg['collab_rounds']}]")
             alignment_data, avg_alignment_targets = None, None
-            if cfg['alignment_data'] != "none":
+            if cfg['alignment_data']:
                 if cfg['alignment_data'] == "public":
                     print(f"Alignment Data: {cfg['alignment_size']} random examples from the public dataset")
                     alignment_idx = np.random.choice(len(Data.public_train_data),
@@ -641,7 +724,8 @@ def main():
                 # TODO
                 pass
 
-            if cfg['global_model'] != 'none':
+            # eval global model
+            if cfg['global_model']:
                 evaluator = create_supervised_evaluator(
                     global_model.to(device),
                     {"acc": ignite.metrics.Accuracy(),
@@ -658,8 +742,6 @@ def main():
 
             # TODO should this go to the start of the loop?
             if cfg['replace_local_model']:
-                if global_model is None:
-                    raise Execption("Global model is None. Can't replace local models")
                 for w in workers:
                     w.model.load_state_dict(global_model.state_dict())
                 print("local models replaced")
@@ -696,7 +778,53 @@ def main():
 
 
 if __name__ == '__main__':
+    config_file = 'config_base.py'
+    if len(sys.argv) >= 2 and Path(sys.argv[1]).is_file():
+        config_file = sys.argv.pop(1)
+
+    global cfg
+    with open(config_file) as f:
+        exec(f.read())
+
+    parser = build_parser()
+    parser.set_defaults(**cfg)
+    args = parser.parse_args()
+    cfg = vars(args)
+
+    if cfg['variant'] == 'fedmd':
+        cfg['global_model'] = None
+        cfg['replace_local_model'] = False
+        cfg['keep_prev_model'] = False
+        cfg['send_global'] = False
+        cfg['contrastive_loss'] = 'none'
+    elif cfg['variant'] == 'fedavg':
+        cfg['global_model'] = 'averaging'
+        cfg['replace_local_model'] = True
+        cfg['keep_prev_model'] = False
+        cfg['send_global'] = False
+        cfg['alignment_data'] = 'none'
+        cfg['contrastive_loss'] = 'none'
+    elif cfg['variant'] == 'moon':
+        cfg['global_model'] = 'averaging'
+        cfg['replace_local_model'] = True
+        cfg['keep_prev_model'] = True
+        cfg['send_global'] = True
+        cfg['alignment_data'] = 'none'
+        cfg['contrastive_loss'] = 'moon'
+    elif cfg['variant'] == 'fedcon':
+        cfg['global_model'] = None
+        cfg['replace_local_model'] = False
+        cfg['keep_prev_model'] = False
+        cfg['send_global'] = False
+        cfg['contrastive_loss'] = 'none'
+
+    print(cfg)
+
+    global device
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Using device: {device}")
+
     # logger = mp.log_to_stderr()
     # logger.setLevel(multiprocessing.SUBDEBUG)
     mp.set_start_method('spawn')  #, force=True)
-    main()
+    fed_main(cfg)
