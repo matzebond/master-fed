@@ -1,3 +1,4 @@
+from itertools import cycle
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Subset, TensorDataset
@@ -18,12 +19,22 @@ def generate_indices(labels, parties = 10, classes_in_use = range(10),
                      balance = True, data_overlap = False):
     if concentration == 'iid':
         concentration = 1e10
+    elif concentration == 'single_class':
+        concentration = 1e-3
 
     if parties < len(classes_in_use):
         balance = False
 
-    for _ in range(10000):  # dont block infinite when balancing
-        dists = np.random.dirichlet(np.repeat(concentration, len(classes_in_use)), parties)
+    for _ in range(1000):  # dont block infinite when balancing
+        if concentration > 0.005:
+            dists = np.random.dirichlet(np.repeat(concentration, len(classes_in_use)),
+                                        parties)
+        else: # below 0.005 numpys dirichlet gives NaN rows
+            dists = np.zeros((parties, len(classes_in_use)))
+            for p, c in zip(range(parties),
+                            cycle(np.random.permutation(classes_in_use))):
+                dists[p][classes_in_use.index(c)] = 1
+
         # rounding would imbalance total samples per party
         num_samples = np.array([clean_round(d) for d in \
                                 dists * len(classes_in_use) * avg_samples_per_class])

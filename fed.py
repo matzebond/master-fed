@@ -34,6 +34,12 @@ from nn import (KLDivSoftmaxLoss, avg_params, optim_to)
 
 
 def build_parser():
+    def float_or_string(string):
+        try:
+            return float(string)
+        except:
+            return string
+
     parser = argparse.ArgumentParser(
         usage='%(prog)s [path/default_config_file.py] [options]'
     )
@@ -68,8 +74,9 @@ def build_parser():
     data.add_argument('--subclasses', nargs='*', default=[0,2,20,63,71,82], type=int,
                       metavar='CLASS',
                       help='subset of all classes that are considered for the private and collaborative training')
-    data.add_argument('--concentration', default=1, type=float, metavar='BETA',
-                      help='parameter of the dirichlet distribution used to produce a non-iid data distribution for the private data, a higher values will produce more iid distributions')
+    data.add_argument('--concentration', default=1, type=float_or_string,
+                      metavar='BETA',
+                      help='parameter of the dirichlet distribution used to produce a non-iid data distribution for the private data, a higher values will produce more iid distributions (a float value, "iid" or "single_class" is expected)')
     data.add_argument('--samples_per_class', default=20, type=int, metavar='SAMPLES',
                       help='per class samples chosen from the training dataset\
                             for non-iid data this is the average samples per class')
