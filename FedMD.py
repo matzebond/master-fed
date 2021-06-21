@@ -109,15 +109,22 @@ class FedMD_CIFAR(nn.Module):
 
         self.output = nn.Linear(output_size, n_classes, bias = False)
 
-    def forward(self, x, output='logits'):
-        x = self.layer1(x)
-        x = self.layer2(x)
-        x = self.layer3(x)
-        x = self.layer4(x)
+    def change_classes(self, n_classes):
+        in_features = self.output.in_features
+        self.output = nn.Linear(in_features, n_classes, bias = False)
 
-        rep = self.projection(x)
-        if output == 'rep_only':
-            return rep
+    def forward(self, x, output='logits', from_rep=None):
+        if from_rep is None:
+            x = self.layer1(x)
+            x = self.layer2(x)
+            x = self.layer3(x)
+            x = self.layer4(x)
+
+            rep = self.projection(x)
+            if output == 'rep_only':
+                return rep
+        else:
+            rep = from_rep
 
         logits = self.output(rep)
         if output == 'both':
