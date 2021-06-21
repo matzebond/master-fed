@@ -26,6 +26,7 @@ from ignite.engine import (Engine, Events,
                            create_supervised_trainer,
                            create_supervised_evaluator)
 import thop
+import ast
 
 import FedMD
 from data import load_idx_from_artifact, build_private_dls
@@ -63,8 +64,7 @@ def build_parser():
                        help='')
     model.add_argument('--model_mapping', nargs='*', type=int,
                        help='')
-    model.add_argument('--projection_head', nargs='*', default=None, type=int,
-                       metavar='LAYER_SIZE',
+    model.add_argument('--projection_head', nargs='*', type=int, metavar='LAYER_SIZE',
                        help='size of the projection head')
 
     # data
@@ -74,6 +74,10 @@ def build_parser():
     data.add_argument('--classes', nargs='*', type=int,
                       metavar='CLASS',
                       help='subset of classes that are used for the private and collaborative training. If empty or not defined all classes of the private dataset are used.')
+    data.add_argument('--classes-list', type=ast.literal_eval, dest='classes',
+                      metavar='CLASSLIST',
+                      help='subset of classes that are used for the private and collaborative training. If empty or not defined all classes of the private dataset are used.')
+
     data.add_argument('--concentration', default=1, type=float_or_string,
                       metavar='BETA',
                       help='parameter of the dirichlet distribution used to produce a non-iid data distribution for the private data, a higher values will produce more iid distributions (a float value, "iid" or "single_class" is expected)')
@@ -105,8 +109,7 @@ def build_parser():
 
     # variant
     variant = parser.add_argument_group('variant')
-    variant.add_argument('--variant', default=None,
-                         choices=['fedmd', 'fedavg', 'moon', 'fedcon'],
+    variant.add_argument('--variant', choices=['fedmd', 'fedavg', 'moon', 'fedcon'],
                          help='algorithm to use for the collaborative training, fixes some of the parameters in the \'variant\' group')
     variant.add_argument('--keep_prev_model', action='store_true',
                          help='parties keep the previous model (used for MOON contrastive loss)')
@@ -116,7 +119,7 @@ def build_parser():
                          help='replace the local model of the parties by the global model')
     variant.add_argument('--send_global', action='store_true',
                          help='send the global model to the parties')
-    variant.add_argument('--contrastive_loss', default='none', choices=['none', 'moon'],
+    variant.add_argument('--contrastive_loss', choices=['moon'],
                          help='contrastive loss for the collaborative training')
     variant.add_argument('--contrastive_loss_weight', type=int,
                          metavar='WEIGHT')
@@ -146,9 +149,6 @@ def build_parser():
     util = parser.add_argument_group('etc')
     util.add_argument('--pool_size', default=1, type=int, metavar='SIZE',
                       help='number of processes')
-    util.add_argument('--ignore', nargs='*', metavar='KEY',
-                      default=['ignore', 'rank', 'model', 'path', 'tmp'],
-                      help='keys ignored my wandb')
 
 
     return parser
@@ -554,8 +554,7 @@ class FedWorker:
 def fed_main(cfg):
     # wandb.tensorboard.patch(root_logdir="wandb/latest-run/files")
     wandb.init(project='master-fed', entity='maschm',
-               config=cfg, config_exclude_keys=cfg['ignore'],
-               sync_tensorboard=True)
+               config=cfg, sync_tensorboard=True)
     # wandb.save("./*/*event*", policy = 'end')
     cfg['path'] = Path(wandb.run.dir)
     cfg['tmp'] = Path("./wandb/tmp/")
@@ -822,27 +821,28 @@ if __name__ == '__main__':
         cfg['replace_local_model'] = False
         cfg['keep_prev_model'] = False
         cfg['send_global'] = False
-        cfg['contrastive_loss'] = 'none'
+        cfg['alignment_data'] = 'public'
+        cfg['alignment_target'] = 'logits'
     elif cfg['variant'] == 'fedavg':
         cfg['global_model'] = 'averaging'
         cfg['replace_local_model'] = True
         cfg['keep_prev_model'] = False
         cfg['send_global'] = False
-        cfg['alignment_data'] = 'none'
-        cfg['contrastive_loss'] = 'none'
+        cfg['alignment_data'] = None
     elif cfg['variant'] == 'moon':
         cfg['global_model'] = 'averaging'
         cfg['replace_local_model'] = True
         cfg['keep_prev_model'] = True
         cfg['send_global'] = True
-        cfg['alignment_data'] = 'none'
+        cfg['alignment_data'] = None
         cfg['contrastive_loss'] = 'moon'
     elif cfg['variant'] == 'fedcon':
         cfg['global_model'] = None
         cfg['replace_local_model'] = False
         cfg['keep_prev_model'] = False
         cfg['send_global'] = False
-        cfg['contrastive_loss'] = 'none'
+        cfg['alignment_data'] = 'public'
+        cfg['alignment_target'] = 'both'
 
     print(cfg)
 

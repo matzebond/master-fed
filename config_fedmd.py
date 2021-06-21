@@ -7,7 +7,6 @@ cfg.update({
     'alignment_size': 200,
     'alignment_target': 'logits',
     'alignment_distillation_loss': 'L1',
-    'alignment_contrastive_loss': 'contrastive',
     'alignment_matching_epochs': 7,
     'alignment_matching_batchsize': 32,
     'alignment_temperature': 1,
