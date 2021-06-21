@@ -73,7 +73,7 @@ def build_parser():
                       help='')
     data.add_argument('--classes', nargs='*', type=int,
                       metavar='CLASS',
-                      help='subset of classes that are used for the private and collaborative training. If not defined all classes of the private dataset are used.')
+                      help='subset of classes that are used for the private and collaborative training. If empty or not defined all classes of the private dataset are used.')
     data.add_argument('--concentration', default=1, type=float_or_string,
                       metavar='BETA',
                       help='parameter of the dirichlet distribution used to produce a non-iid data distribution for the private data, a higher values will produce more iid distributions (a float value, "iid" or "single_class" is expected)')
@@ -576,8 +576,13 @@ def fed_main(cfg):
     else:
         raise NotImplementedError(f"dataset '{cfg['dataset']}' is unknown")
 
-    if cfg['classes'] is None:
+    cfg['num_public_classes'] = len(Data.public_train_data.classes)
+    cfg['num_private_classes'] = len(Data.private_train_data.classes)
+
+    if cfg['classes'] is None or len(cfg['classes']) == 0:
         cfg['classes'] = list(range(len(Data.private_train_data.classes)))
+    elif any((True for c in cfg['classes'] if c >= cfg['num_private_classes'])):
+        raise Exception("--classes out of range")
 
     private_idxs, private_test_idxs = load_idx_from_artifact(
         cfg,
@@ -600,8 +605,6 @@ def fed_main(cfg):
     class_names = [Data.private_train_data.classes[x] for x in cfg['classes']]
     print("public classes:", Data.public_train_data.classes)
     print("private classes: ", class_names)
-    cfg['num_public_classes'] = len(Data.public_train_data.classes)
-    cfg['num_private_classes'] = len(Data.private_train_data.classes)
 
     with Pool(cfg['pool_size'], init_pool_process,
               [dill.dumps(private_dls),
