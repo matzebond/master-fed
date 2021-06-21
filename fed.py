@@ -69,7 +69,7 @@ def build_parser():
 
     # data
     data = parser.add_argument_group('data')
-    data.add_argument('--dataset', default='CIFAR100', choices=['CIFAR100'],
+    data.add_argument('--dataset', default='CIFAR100', choices=['CIFAR100', 'CIFAR10'],
                       help='')
     data.add_argument('--classes', nargs='*', type=int,
                       metavar='CLASS',
@@ -565,6 +565,14 @@ def fed_main(cfg):
 
     if cfg['dataset'] == 'CIFAR100' or cfg['dataset'] == 'CIFAR':
         import CIFAR as Data
+    elif cfg['dataset'] == 'CIFAR10':
+        import CIFAR as Data
+        tmp = Data.public_train_data
+        Data.public_train_data = Data.private_train_data
+        Data.private_train_data = tmp
+        tmp = Data.public_test_data
+        Data.public_test_data = Data.private_test_data
+        Data.private_test_data = tmp
     else:
         raise NotImplementedError(f"dataset '{cfg['dataset']}' is unknown")
 
