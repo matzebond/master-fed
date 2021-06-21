@@ -8,11 +8,11 @@ cfg.update({
     'collab_rounds': 5,
     'stages': ['init_public', 'init_private', 'collab'],
 
-    'projection_head': [64],
+    'projection_head': [256],
 
-    'samples_per_class': 20,
+    'samples_per_class': 3,
     'dataset': 'CIFAR100',
-    'subclasses': [0,2,20,63,71,82],
+    'classes': [0,2,20,63,71,82],
     'concentration': 1,
 
     'variant': None,
@@ -27,7 +27,7 @@ cfg.update({
     'alignment_target': 'both',
     'alignment_distillation_loss': 'L1',
     'alignment_contrastive_loss': 'contrastive+distillation',
-    'alignment_size': 100,
+    'alignment_size': 128,
     'alignment_matching_epochs': 2,
     'alignment_matching_batch_size': 32,
     'alignment_temperature': 1,
@@ -40,8 +40,8 @@ cfg.update({
     'init_private_epochs': 0,
     'init_private_batch_size': 32,
     # 'private_training_batchsize': 5, # TODO not supported
-    'upper_bound_epochs': 2,
-    'lower_bound_epochs': 2,
+    'upper_bound_epochs': 10,
+    'lower_bound_epochs': 10,
 
     'pool_size': 1,
 })

@@ -78,6 +78,9 @@ def generate_dist_indices(targets, classes_in_use = range(10), dists = None):
 
 
 def generate_total_indices(targets, classes_in_use = range(10)):
+    if classes_in_use is None:
+        return targets
+
     combined_idx = np.array([], dtype = np.int16)
     for cls in classes_in_use:
         idx = np.where(targets == cls)[0]
@@ -86,7 +89,7 @@ def generate_total_indices(targets, classes_in_use = range(10)):
 
 
 def get_idx_artifact_name(cfg):
-    return f"p{cfg['parties']}_s{cfg['samples_per_class']}_c{cfg['concentration']}_C{'-'.join(map(str,cfg['subclasses']))}"
+    return f"p{cfg['parties']}_s{cfg['samples_per_class']}_c{cfg['concentration']}_C{'-'.join(map(str,cfg['classes']))}"
 
 def save_idx_to_artifact(cfg, idxs, num_samples, test_idxs):
     idx_artifact_name = get_idx_artifact_name(cfg)
@@ -94,7 +97,7 @@ def save_idx_to_artifact(cfg, idxs, num_samples, test_idxs):
                                     metadata={
                                         'parties': cfg['parties'],
                                         'samples_per_class': cfg['samples_per_class'],
-                                        'subclasses': cfg['subclasses'],
+                                        'classes': cfg['classes'],
                                         'concentration': cfg['concentration'],
                                         'distributions': num_samples,
                                         'class_total': num_samples.sum(axis=0)})
@@ -122,9 +125,9 @@ def load_idx_from_artifact(cfg, targets, test_targets):
         print(f'Private Idx: Create "{idx_artifact_name}" artifact with new random private indices')
 
         idxs, num_samples, dists = generate_indices(
-            targets, cfg['parties'], cfg['subclasses'],
+            targets, cfg['parties'], cfg['classes'],
             cfg['samples_per_class'], cfg['concentration'])
-        test_idxs = generate_dist_indices(test_targets, cfg['subclasses'], dists)
+        test_idxs = generate_dist_indices(test_targets, cfg['classes'], dists)
         idx_artifact = save_idx_to_artifact(cfg, idxs, num_samples, test_idxs)
     try:
         idx_artifact.wait()  # throws execption in offline mode
@@ -139,11 +142,12 @@ def load_idx_from_artifact(cfg, targets, test_targets):
 
 def build_private_dls(private_train_data, private_test_data,
                       private_idxs, private_test_idxs,
-                      num_public_classes, subclasses,
-                      batch_size):
-    def collate_fn(batch):
-        batch = [ (i[0], num_public_classes + subclasses.index(i[1])) for i in batch]
-        return torch.utils.data.dataloader._utils.collate.default_collate(batch)
+                      classes, batch_size):
+    collate_fn = torch.utils.data.dataloader._utils.collate.default_collate
+    if len(classes) != len(private_train_data.classes):
+        def collate_fn(batch):
+            batch = [ (i[0], classes.index(i[1])) for i in batch ]
+            return torch.utils.data.dataloader._utils.collate.default_collate(batch)
 
     private_dls = []
     private_test_dls = []
@@ -165,7 +169,7 @@ def build_private_dls(private_train_data, private_test_data,
                              collate_fn=collate_fn, shuffle=True)
 
     private_sub_test_idx = generate_total_indices(np.array(private_test_data.targets),
-                                                  subclasses)
+                                                  classes)
     combined_test_dl = DataLoader(Subset(private_test_data, private_sub_test_idx),
                                   batch_size=batch_size,
                                   collate_fn=collate_fn)

@@ -11,13 +11,13 @@ cfg = {
     'samples_per_class': 20,
     'dataset': 'CIFAR100',
     'concentration': 1,
-    'subclasses': [0,2,20,63,71,82],
+    'classes': [0,2,20,63,71,82],
 
     'variant': None,
     'private_training_epochs': 10,
 
     'pool_size': 4,
-    'ignore': ['ignore', 'rank', 'model', 'path', 'tmp'], #'pool_size'],
+    'ignore': ['ignore', 'rank', 'model', 'path', 'tmp', 'num_public_classes'], #'pool_size'],
 }
 
 cfg['model_mapping'] = list(repeat(3, cfg['parties']))

@@ -71,9 +71,9 @@ def build_parser():
     data = parser.add_argument_group('data')
     data.add_argument('--dataset', default='CIFAR100', choices=['CIFAR100'],
                       help='')
-    data.add_argument('--subclasses', nargs='*', default=[0,2,20,63,71,82], type=int,
+    data.add_argument('--classes', nargs='*', type=int,
                       metavar='CLASS',
-                      help='subset of all classes that are considered for the private and collaborative training')
+                      help='subset of classes that are used for the private and collaborative training. If not defined all classes of the private dataset are used.')
     data.add_argument('--concentration', default=1, type=float_or_string,
                       metavar='BETA',
                       help='parameter of the dirichlet distribution used to produce a non-iid data distribution for the private data, a higher values will produce more iid distributions (a float value, "iid" or "single_class" is expected)')
@@ -282,6 +282,7 @@ class FedWorker:
     @self_dec
     def init_public(self):
         print(f"party {self.cfg['rank']}: start 'init_public' stage")
+        self.model.change_classes(self.cfg['num_public_classes'])
         self.gstep = 0
         self.setup()
 
@@ -305,6 +306,7 @@ class FedWorker:
     def init_private(self):
         print(f"party {self.cfg['rank']}: start 'init_private' stage")
         self.model.load_state_dict(torch.load(f"{self.cfg['tmp']}/init_public.pth"))
+        self.model.change_classes(self.cfg['num_private_classes'])
         self.gstep = 0
         self.setup(torch.load(f"{self.cfg['tmp']}/init_public_optim.pth"))
 
@@ -324,7 +326,9 @@ class FedWorker:
 
     @self_dec
     def upper_bound(self):
+        self.model.change_classes(self.cfg['num_public_classes'])
         self.model.load_state_dict(torch.load(f"{self.cfg['tmp']}/init_public.pth"))
+        self.model.change_classes(self.cfg['num_private_classes'])
         self.gstep = 0
         self.setup(torch.load(f"{self.cfg['tmp']}/init_public_optim.pth"))
 
@@ -564,6 +568,9 @@ def fed_main(cfg):
     else:
         raise NotImplementedError(f"dataset '{cfg['dataset']}' is unknown")
 
+    if cfg['classes'] is None:
+        cfg['classes'] = list(range(len(Data.private_train_data.classes)))
+
     private_idxs, private_test_idxs = load_idx_from_artifact(
         cfg,
         np.array(Data.private_train_data.targets),
@@ -573,8 +580,7 @@ def fed_main(cfg):
         Data.private_train_data,
         Data.private_test_data,
         private_idxs, private_test_idxs,
-        10,
-        cfg['subclasses'],
+        cfg['classes'],
         cfg['init_private_batch_size']
     )
     public_train_dl = DataLoader(Data.public_train_data,
@@ -583,10 +589,11 @@ def fed_main(cfg):
                                 batch_size=cfg['init_public_batch_size'])
 
     print(f"train {cfg['parties']} models on")
-    subclass_names = [Data.private_train_data.classes[x] for x in cfg['subclasses']]
-    combined_class_names = Data.public_train_data.classes + subclass_names
-    print("subclasses: ", subclass_names)
-    print("all classes: ", combined_class_names)
+    class_names = [Data.private_train_data.classes[x] for x in cfg['classes']]
+    print("public classes:", Data.public_train_data.classes)
+    print("private classes: ", class_names)
+    cfg['num_public_classes'] = len(Data.public_train_data.classes)
+    cfg['num_private_classes'] = len(Data.private_train_data.classes)
 
     with Pool(cfg['pool_size'], init_pool_process,
               [dill.dumps(private_dls),
@@ -605,15 +612,15 @@ def fed_main(cfg):
             w_cfg['architecture'] = FedMD.FedMD_CIFAR.hyper[w_cfg['model']]
             model = FedMD.FedMD_CIFAR(*w_cfg['architecture'],
                                       projection = cfg['projection_head'],
-                                      n_classes = 10+len(cfg['subclasses']),
+                                      n_classes = cfg['num_private_classes'],
                                       input_size = (3, 32, 32))
             args.append((w_cfg, model))
         workers = pool.starmap(FedWorker, args)
         del args
 
         model = copy.deepcopy(workers[0].model)
-        input = Data.public_train_data[0][0].unsqueeze(0)
-        macs, params = thop.profile(model, inputs=(input, ))
+        test_input = Data.public_train_data[0][0].unsqueeze(0)
+        macs, params = thop.profile(model, inputs=(test_input, ))
         print(*thop.clever_format([macs, params], "%.3f"))
         wandb.config.update({"model": {"macs": macs, "params": params}})
         del model
@@ -630,6 +637,8 @@ def fed_main(cfg):
                 util.save_models_to_artifact(cfg, workers, "init_public",
                                              {"acc": acc, "loss": loss})
         elif "load_init_public" in cfg['stages']:
+            for w in workers:
+                w.model.change_classes(cfg['num_public_classes'])
             util.load_models_from_artifact(cfg, workers, "init_public")
 
         if "init_private" in cfg['stages']:
@@ -644,6 +653,8 @@ def fed_main(cfg):
                 util.save_models_to_artifact(cfg, workers, "init_private",
                                              {"acc": acc, "loss": loss})
         elif "load_init_private" in cfg['stages']:
+            for w in workers:
+                w.model.change_classes(cfg['num_private_classes'])
             util.load_models_from_artifact(cfg, workers, "init_private")
 
 
