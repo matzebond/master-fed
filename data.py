@@ -14,18 +14,19 @@ def clean_round(array: np.array) -> np.array:
     assert rem < 0.000001
     return res
 
-def generate_indices(labels, parties = 10, classes_in_use = range(10),
-                     avg_samples_per_class = 20, concentration = 'iid',
-                     balance = True, data_overlap = False):
+def partition_data(labels, parties = 10, classes_in_use = range(10),
+                   avg_samples_per_class = 20, concentration = 'iid',
+                   balance = True, data_overlap = False):
     if concentration == 'iid':
         concentration = 1e10
     elif concentration == 'single_class':
         concentration = 1e-3
 
     if parties < len(classes_in_use):
+        print('Too few parties. No balancing of the indices.')
         balance = False
 
-    for _ in range(1000):  # dont block infinite when balancing
+    for _ in range(10000):  # dont block infinite when balancing
         if concentration > 0.005:
             dists = np.random.dirichlet(np.repeat(concentration, len(classes_in_use)),
                                         parties)
@@ -43,6 +44,8 @@ def generate_indices(labels, parties = 10, classes_in_use = range(10),
            or (class_sum.min() > avg_samples_per_class/2 and
                class_sum.max() - class_sum.min() < avg_samples_per_class*parties/2):
             break
+    else:
+        print("Could not balance the distribution.")
 
     samples_cumsum = np.cumsum(num_samples, axis=0)
     idxs = [np.array([],dtype=int)] * parties
@@ -124,7 +127,7 @@ def load_idx_from_artifact(cfg, targets, test_targets):
     except (wandb.CommError, Exception):
         print(f'Private Idx: Create "{idx_artifact_name}" artifact with new random private indices')
 
-        idxs, num_samples, dists = generate_indices(
+        idxs, num_samples, dists = partition_data(
             targets, cfg['parties'], cfg['classes'],
             cfg['samples_per_class'], cfg['concentration'])
         test_idxs = generate_dist_indices(test_targets, cfg['classes'], dists)

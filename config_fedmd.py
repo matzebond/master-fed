@@ -8,7 +8,7 @@ cfg.update({
     'alignment_target': 'logits',
     'alignment_distillation_loss': 'L1',
     'alignment_matching_epochs': 7,
-    'alignment_matching_batchsize': 32,
+    'alignment_matching_batch_size': 32,
     'alignment_temperature': 1,
     'private_training_epochs': 3,
 })
