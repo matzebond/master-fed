@@ -132,7 +132,8 @@ def load_idx_from_artifact(cfg, targets, test_targets):
         test_idxs = np.load(test_idx_file)
         print(f'Private Idx: Use "{idx_artifact_name}" artifact with saved private indices')
         
-    except (wandb.CommError, Exception):
+    except (wandb.CommError, AttributeError) as e:
+        print(e)
         print(f'Private Idx: Create "{idx_artifact_name}" artifact with new random private indices')
 
         idxs, counts, dists = partition_data(
@@ -141,6 +142,9 @@ def load_idx_from_artifact(cfg, targets, test_targets):
             cfg['concentration'], cfg['partition_overlap'])
         test_idxs = partition_by_dist(test_targets, cfg['classes'], dists)
         idx_artifact = save_idx_to_artifact(cfg, idxs, counts, test_idxs)
+    except Exception as e:
+        raise e
+
     try:
         idx_artifact.wait()  # throws execption in offline mode
     except Exception as e:
