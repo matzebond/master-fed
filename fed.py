@@ -525,7 +525,7 @@ class FedWorker:
                 prev_rep = self.prev_model(x, output='rep_only')
 
                 pos = F.cosine_similarity(local_rep, global_rep, dim=-1).reshape(-1,1)
-                neg = F.cosine_similarity(local_rep, prev_rep).reshape(-1,1)
+                neg = F.cosine_similarity(local_rep, prev_rep, dim=-1).reshape(-1,1)
 
                 logits = torch.cat((pos, neg), dim=1)
                 logits /= self.cfg['contrastive_loss_temperature']
