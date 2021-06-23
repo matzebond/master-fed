@@ -10,8 +10,9 @@ cfg = {
 
     'dataset': 'CIFAR10',
     'classes': None,
-    'samples_per_class': None,
+    'samples': None,
     'concentration': 0.5,
+    'partition_normalize': 'class',
 
     'private_training_epochs': 10,
 

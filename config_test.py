@@ -10,10 +10,11 @@ cfg.update({
 
     'projection_head': [256],
 
-    'samples_per_class': 3,
     'dataset': 'CIFAR100',
     'classes': [0,2,20,63,71,82],
+    'samples': 3,
     'concentration': 1,
+    'partition_normalize': 'party',
 
     'variant': None,
     'keep_prev_model': False,

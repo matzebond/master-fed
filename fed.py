@@ -84,8 +84,8 @@ def build_parser():
     data.add_argument('--concentration', default=1, type=float_or_string,
                       metavar='BETA',
                       help='parameter of the dirichlet distribution used to produce a non-iid data distribution for the private data, a higher values will produce more iid distributions (a float value, "iid" or "single_class" is expected)')
-    data.add_argument('--samples_per_class', type=int, metavar='SAMPLES',
-                      help='per class samples chosen from the training dataset. For party normalized non-iid data this is the average samples per class. The default is to use all data and don\'t sample')
+    data.add_argument('--samples', type=int, metavar='SAMPLES',
+                      help='if normalizing per class specifies the samples per class chosen from the training dataset. if normalizing per party specifies the samples per party chosen from the training dataset. The default is to use all data and not to sample down.')
     data.add_argument('--partition_overlap', action='store_true',
                       help='')
 

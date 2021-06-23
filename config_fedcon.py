@@ -8,7 +8,7 @@ cfg.update({
     'alignment_target': 'both',
     'alignment_distillation_loss': None,
     'alignment_contrastive_loss': 'contrastive',
-    'contrastive_loss_temperature': 1,
+    'contrastive_loss_temperature': 0.5,
     'contrastive_loss_weight': 1,
     'alignment_matching_epochs': 7,
     'alignment_matching_batch_size': 32,

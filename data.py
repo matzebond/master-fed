@@ -15,7 +15,7 @@ def clean_round(array: np.array) -> np.array:
     return res
 
 def partition_data(labels, parties = 10, classes_in_use = range(10),
-                   normalize = "class", samples_per_class = None, concentration = 'iid',
+                   normalize = "class", samples = None, concentration = 'iid',
                    data_overlap = False, balance = True):
     if concentration == 'iid':
         concentration = 1e10
@@ -44,11 +44,11 @@ def partition_data(labels, parties = 10, classes_in_use = range(10),
 
     cumsums = np.cumsum(dists, axis=0)
     idxs = [np.array([],dtype=int)] * parties
-    samples = np.zeros((parties, len(classes_in_use)),dtype=int)
+    counts = np.zeros((parties, len(classes_in_use)),dtype=int)
 
     for n, cls in enumerate(classes_in_use):
         idx = np.nonzero(labels == cls)[0]
-        amount = samples_per_class or len(idx)
+        amount = samples or len(idx)
         if normalize == 'class':
             cumsums[:,n] /= cumsums[-1,n]
             dists[1:,n] = np.diff(cumsums[:,n])
@@ -60,9 +60,9 @@ def partition_data(labels, parties = 10, classes_in_use = range(10),
             idx = np.split(idx, splits)[:-1]
         for i in range(parties):
             idxs[i] = np.r_[idxs[i], idx[i]]
-        samples[:,n] = [ len(i) for i in idx ]
+        counts[:,n] = [ len(i) for i in idx ]
 
-    return idxs, samples, dists
+    return idxs, counts, dists
 
 
 def partition_by_dist(targets, classes_in_use = range(10), dists = None):
@@ -96,21 +96,22 @@ def generate_total_indices(targets, classes_in_use = range(10)):
 
 def get_idx_artifact_name(cfg):
     if cfg['partition_normalize'] == "party":
-        return f"p{cfg['parties']}_s{cfg['samples_per_class']}_c{cfg['concentration']}_C{'-'.join(map(str,cfg['classes']))}"
+        return f"p{cfg['parties']}_s{cfg['samples']}_c{cfg['concentration']}_C{'-'.join(map(str,cfg['classes']))}"
     else:
-        return f"p{cfg['parties']}_n{cfg['partition_normalize']}_s{cfg['samples_per_class']}_c{cfg['concentration']}_C{'-'.join(map(str,cfg['classes']))}"
+        return f"p{cfg['parties']}_n{cfg['partition_normalize']}_s{cfg['samples']}_c{cfg['concentration']}_C{'-'.join(map(str,cfg['classes']))}"
 
-def save_idx_to_artifact(cfg, idxs, num_samples, test_idxs):
+def save_idx_to_artifact(cfg, idxs, counts, test_idxs):
     idx_artifact_name = get_idx_artifact_name(cfg)
     idx_artifact = wandb.Artifact(idx_artifact_name, type='private_indices',
                                     metadata={
                                         'parties': cfg['parties'],
-                                        'samples_per_class': cfg['samples_per_class'],
+                                        'normalize': cfg['partition_normalize'],
+                                        'samples': cfg['samples'],
                                         'classes': cfg['classes'],
                                         'concentration': cfg['concentration'],
-                                        'distributions': num_samples,
-                                        'class_total': num_samples.sum(axis=0),
-                                        'party_total': num_samples.sum(axis=1)})
+                                        'distributions': counts,
+                                        'class_total': counts.sum(axis=0),
+                                        'party_total': counts.sum(axis=1)})
     with idx_artifact.new_file('idxs.npy', 'xb') as f:
         np.save(f, idxs)
     with idx_artifact.new_file('test_idxs.npy', 'xb') as f:
@@ -134,12 +135,12 @@ def load_idx_from_artifact(cfg, targets, test_targets):
     except (wandb.CommError, Exception):
         print(f'Private Idx: Create "{idx_artifact_name}" artifact with new random private indices')
 
-        idxs, num_samples, dists = partition_data(
+        idxs, counts, dists = partition_data(
             targets, cfg['parties'], cfg['classes'],
-            cfg['partition_normalize'], cfg['samples_per_class'],
+            cfg['partition_normalize'], cfg['samples'],
             cfg['concentration'], cfg['partition_overlap'])
         test_idxs = partition_by_dist(test_targets, cfg['classes'], dists)
-        idx_artifact = save_idx_to_artifact(cfg, idxs, num_samples, test_idxs)
+        idx_artifact = save_idx_to_artifact(cfg, idxs, counts, test_idxs)
     try:
         idx_artifact.wait()  # throws execption in offline mode
     except Exception as e:
@@ -181,8 +182,8 @@ def build_private_dls(private_train_data, private_test_data,
         private_test_dls.append(test_dl)
 
 
-    combined_dl = DataLoader(Subset(private_train_data,
-                                    np.concatenate(private_idxs)),
+    combined_idx = np.concatenate(private_idxs)
+    combined_dl = DataLoader(Subset(private_train_data, combined_idx),
                              batch_size=batch_size,
                              collate_fn=collate_fn, shuffle=True)
 
