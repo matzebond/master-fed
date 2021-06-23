@@ -581,7 +581,8 @@ def fed_main(cfg):
 
     if cfg['classes'] is None or len(cfg['classes']) == 0:
         cfg['classes'] = list(range(len(Data.private_train_data.classes)))
-    elif any((True for c in cfg['classes'] if c >= cfg['num_private_classes'])):
+    elif any((True for c in cfg['classes'] \
+              if c >= len(Data.private_train_data.classes))):
         raise Exception("--classes out of range")
 
     cfg['num_public_classes'] = len(Data.public_train_data.classes)
