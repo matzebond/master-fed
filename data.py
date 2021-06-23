@@ -148,9 +148,9 @@ def load_idx_from_artifact(cfg, targets, test_targets):
     try:
         dists = idx_artifact.metadata['distributions']
         print("party distributions:\n", dists)
-        total_class = idx_artifact.metadata['class_total']
-        print("party total:\n", total_party)
         total_party = idx_artifact.metadata['party_total']
+        print("party total:\n", total_party)
+        total_class = idx_artifact.metadata['class_total']
         print("class total:\n", total_class)
     except Exception as e:
         pass
