@@ -144,12 +144,17 @@ def load_idx_from_artifact(cfg, targets, test_targets):
         idx_artifact.wait()  # throws execption in offline mode
     except Exception as e:
         pass
-    dists = idx_artifact.metadata['distributions']
-    total_class = dists.sum(axis=0)
-    total_party = dists.sum(axis=1)
-    print("party distributions:\n", dists)
-    print("party total:\n", total_party)
-    print("class total:\n", total_class)
+
+    try:
+        dists = idx_artifact.metadata['distributions']
+        print("party distributions:\n", dists)
+        total_class = idx_artifact.metadata['class_total']
+        print("party total:\n", total_party)
+        total_party = idx_artifact.metadata['party_total']
+        print("class total:\n", total_class)
+    except Exception as e:
+        pass
+
     return idxs, test_idxs
 
 
