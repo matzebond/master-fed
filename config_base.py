@@ -8,14 +8,14 @@ cfg = {
 
     'projection_head': 256,
 
-    'samples_per_class': 20,
     'dataset': 'CIFAR10',
-    'concentration': 0.1,
     'classes': None,
+    'samples_per_class': None,
+    'concentration': 0.5,
 
     'private_training_epochs': 10,
 
-    'pool_size': 3,
+    'pool_size': 4,
 }
 
 cfg['model_mapping'] = list(repeat(3, cfg['parties']))

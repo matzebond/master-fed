@@ -78,12 +78,16 @@ def build_parser():
                       metavar='CLASSLIST',
                       help='subset of classes that are used for the private and collaborative training. If empty or not defined all classes of the private dataset are used.')
 
+    data.add_argument('--partition_normalize', default='class',
+                      choices=['class', 'party'],
+                      help='select the target against which to normalize the partition in. Eather all parties or all classes have the same amount of data')
     data.add_argument('--concentration', default=1, type=float_or_string,
                       metavar='BETA',
                       help='parameter of the dirichlet distribution used to produce a non-iid data distribution for the private data, a higher values will produce more iid distributions (a float value, "iid" or "single_class" is expected)')
-    data.add_argument('--samples_per_class', default=20, type=int, metavar='SAMPLES',
-                      help='per class samples chosen from the training dataset\
-                            for non-iid data this is the average samples per class')
+    data.add_argument('--samples_per_class', type=int, metavar='SAMPLES',
+                      help='per class samples chosen from the training dataset. For party normalized non-iid data this is the average samples per class. The default is to use all data and don\'t sample')
+    data.add_argument('--partition_overlap', action='store_true',
+                      help='')
 
     # training
     training = parser.add_argument_group('training')
@@ -575,13 +579,13 @@ def fed_main(cfg):
     else:
         raise NotImplementedError(f"dataset '{cfg['dataset']}' is unknown")
 
-    cfg['num_public_classes'] = len(Data.public_train_data.classes)
-    cfg['num_private_classes'] = len(Data.private_train_data.classes)
-
     if cfg['classes'] is None or len(cfg['classes']) == 0:
         cfg['classes'] = list(range(len(Data.private_train_data.classes)))
     elif any((True for c in cfg['classes'] if c >= cfg['num_private_classes'])):
         raise Exception("--classes out of range")
+
+    cfg['num_public_classes'] = len(Data.public_train_data.classes)
+    cfg['num_private_classes'] = len(cfg['classes'])
 
     private_idxs, private_test_idxs = load_idx_from_artifact(
         cfg,

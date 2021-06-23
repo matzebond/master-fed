@@ -4,19 +4,19 @@ import torch
 from torch.utils.data import DataLoader, Subset, TensorDataset
 import wandb
 
-
+# deprecated
 def clean_round(array: np.array) -> np.array:
     rem = 0
     res = np.zeros_like(array, dtype=int)
     for i, item in enumerate(array):
         res[i] = round(item+rem)
         rem = item+rem - res[i]
-    assert rem < 0.000001
+    # assert rem < 0.000001
     return res
 
 def partition_data(labels, parties = 10, classes_in_use = range(10),
-                   avg_samples_per_class = 20, concentration = 'iid',
-                   balance = True, data_overlap = False):
+                   normalize = "class", samples_per_class = None, concentration = 'iid',
+                   data_overlap = False, balance = True):
     if concentration == 'iid':
         concentration = 1e10
     elif concentration == 'single_class':
@@ -36,39 +36,42 @@ def partition_data(labels, parties = 10, classes_in_use = range(10),
                             cycle(np.random.permutation(classes_in_use))):
                 dists[p][classes_in_use.index(c)] = 1
 
-        # rounding would imbalance total samples per party
-        num_samples = np.array([clean_round(d) for d in \
-                                dists * len(classes_in_use) * avg_samples_per_class])
-        class_sum = num_samples.sum(axis=0)
-        if not balance \
-           or (class_sum.min() > avg_samples_per_class/2 and
-               class_sum.max() - class_sum.min() < avg_samples_per_class*parties/2):
+        class_sum = dists.sum(axis=0)
+        if not balance or class_sum.max() - class_sum.min() < class_sum.mean():
             break
     else:
         print("Could not balance the distribution.")
 
-    samples_cumsum = np.cumsum(num_samples, axis=0)
+    cumsums = np.cumsum(dists, axis=0)
     idxs = [np.array([],dtype=int)] * parties
+    samples = np.zeros((parties, len(classes_in_use)),dtype=int)
+
     for n, cls in enumerate(classes_in_use):
         idx = np.nonzero(labels == cls)[0]
-        idx = np.random.choice(idx, class_sum[n], replace = data_overlap)
-        idx = np.split(idx, samples_cumsum[:-1,n])
+        amount = samples_per_class or len(idx)
+        if normalize == 'class':
+            cumsums[:,n] /= cumsums[-1,n]
+            dists[1:,n] = np.diff(cumsums[:,n])
+            splits = (cumsums[:,n] * amount).round().astype(int)
+            idx = np.split(idx, splits)[:-1]
+        elif normalize == 'party':
+            splits = (cumsums[:,n] * amount).round().astype(int)
+            idx = np.random.choice(idx, splits[-1], replace=data_overlap)
+            idx = np.split(idx, splits)[:-1]
         for i in range(parties):
             idxs[i] = np.r_[idxs[i], idx[i]]
+        samples[:,n] = [ len(i) for i in idx ]
 
-    return idxs, num_samples, dists
+    return idxs, samples, dists
 
 
-
-def generate_dist_indices(targets, classes_in_use = range(10), dists = None):
+def partition_by_dist(targets, classes_in_use = range(10), dists = None):
     if dists is None:
         dists = [[1/len(classes_in_use)] * classes_in_use]
-    else:
-        assert(np.allclose(np.sum(dists, axis=1), 1))
 
     counts = np.bincount(targets)
     counts = counts.take(classes_in_use)
-    num_samples = [clean_round(d) for d in dists * counts]
+    num_samples = [d.round().astype(int) for d in dists * counts]
 
     idxs = []
     for num in num_samples:
@@ -92,7 +95,10 @@ def generate_total_indices(targets, classes_in_use = range(10)):
 
 
 def get_idx_artifact_name(cfg):
-    return f"p{cfg['parties']}_s{cfg['samples_per_class']}_c{cfg['concentration']}_C{'-'.join(map(str,cfg['classes']))}"
+    if cfg['partition_normalize'] == "party":
+        return f"p{cfg['parties']}_s{cfg['samples_per_class']}_c{cfg['concentration']}_C{'-'.join(map(str,cfg['classes']))}"
+    else:
+        return f"p{cfg['parties']}_n{cfg['partition_normalize']}_s{cfg['samples_per_class']}_c{cfg['concentration']}_C{'-'.join(map(str,cfg['classes']))}"
 
 def save_idx_to_artifact(cfg, idxs, num_samples, test_idxs):
     idx_artifact_name = get_idx_artifact_name(cfg)
@@ -103,7 +109,8 @@ def save_idx_to_artifact(cfg, idxs, num_samples, test_idxs):
                                         'classes': cfg['classes'],
                                         'concentration': cfg['concentration'],
                                         'distributions': num_samples,
-                                        'class_total': num_samples.sum(axis=0)})
+                                        'class_total': num_samples.sum(axis=0),
+                                        'party_total': num_samples.sum(axis=1)})
     with idx_artifact.new_file('idxs.npy', 'xb') as f:
         np.save(f, idxs)
     with idx_artifact.new_file('test_idxs.npy', 'xb') as f:
@@ -129,17 +136,20 @@ def load_idx_from_artifact(cfg, targets, test_targets):
 
         idxs, num_samples, dists = partition_data(
             targets, cfg['parties'], cfg['classes'],
-            cfg['samples_per_class'], cfg['concentration'])
-        test_idxs = generate_dist_indices(test_targets, cfg['classes'], dists)
+            cfg['partition_normalize'], cfg['samples_per_class'],
+            cfg['concentration'], cfg['partition_overlap'])
+        test_idxs = partition_by_dist(test_targets, cfg['classes'], dists)
         idx_artifact = save_idx_to_artifact(cfg, idxs, num_samples, test_idxs)
     try:
         idx_artifact.wait()  # throws execption in offline mode
     except Exception as e:
         pass
     dists = idx_artifact.metadata['distributions']
-    total = idx_artifact.metadata['class_total']
+    total_class = dists.sum(axis=0)
+    total_party = dists.sum(axis=1)
     print("party distributions:\n", dists)
-    print("class total:\n", total)
+    print("party total:\n", total_party)
+    print("class total:\n", total_class)
     return idxs, test_idxs
 
 
