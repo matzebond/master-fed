@@ -1,6 +1,6 @@
+global cfg
 from config_base import cfg
 
-global cfg
 cfg.update({
     'variant': 'fedmd',
     'alignment_data': 'public',

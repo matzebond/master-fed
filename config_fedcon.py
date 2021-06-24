@@ -1,6 +1,6 @@
+global cfg
 from config_base import cfg
 
-global cfg
 cfg.update({
     'variant': 'fedcon',
     'alignment_data': 'public',

@@ -26,6 +26,7 @@ def partition_data(labels, parties = 10, classes_in_use = range(10),
         print('Too few parties. No balancing of the indices.')
         balance = False
 
+    dists = None
     for _ in range(10000):  # dont block infinite when balancing
         if concentration > 0.005:
             dists = np.random.dirichlet(np.repeat(concentration, len(classes_in_use)),
@@ -127,9 +128,9 @@ def load_idx_from_artifact(cfg, targets, test_targets):
                                           type='private_indices')
         # artifact_dir = idx_artifact.download()
         idx_file = idx_artifact.get_path('idxs.npy').download()
-        idxs = np.load(idx_file)
+        idxs = np.load(idx_file, allow_pickle=True)
         test_idx_file = idx_artifact.get_path('test_idxs.npy').download()
-        test_idxs = np.load(test_idx_file)
+        test_idxs = np.load(test_idx_file, allow_pickle=True)
         print(f'Private Idx: Use "{idx_artifact_name}" artifact with saved private indices')
         
     except (wandb.CommError, AttributeError) as e:

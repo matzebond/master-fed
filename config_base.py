@@ -1,6 +1,6 @@
+global cfg
 from itertools import islice, cycle, repeat
 
-global cfg
 cfg = {
     'parties': 10,
     'collab_rounds': 100,

@@ -1,8 +1,6 @@
-from itertools import repeat
-
+global cfg
 from config_base import cfg
 
-global cfg
 cfg.update({
     'parties': 2,
     'collab_rounds': 5,
@@ -47,4 +45,5 @@ cfg.update({
     'pool_size': 1,
 })
 
+from itertools import repeat
 cfg['model_mapping'] = list(repeat(3, cfg['parties']))

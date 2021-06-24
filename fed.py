@@ -153,6 +153,8 @@ def build_parser():
     util = parser.add_argument_group('etc')
     util.add_argument('--pool_size', default=1, type=int, metavar='SIZE',
                       help='number of processes')
+    util.add_argument('--seed', default=0, type=int,
+                      help="the seed with which to initialize numpy, torch, cuda and random")
 
 
     return parser
@@ -192,8 +194,11 @@ class FedWorker:
         self.cfg = cfg
         print(f"start run {self.cfg['rank']} in pid {os.getpid()}")
 
-        np.random.seed()
-        torch.manual_seed(np.random.randint(0, 0xffff_ffff))
+        np.random.seed(cfg['seed'])
+        torch.manual_seed(cfg['seed'])
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(cfg['seed'])
+        random.seed(cfg['seed'])
 
         os.makedirs(self.cfg['path'])
         os.makedirs(self.cfg['tmp'])
@@ -411,9 +416,9 @@ class FedWorker:
         self.teardown()
 
         if self.cfg['alignment_target'] == 'logits':
-            return alignment_collector.state.logits, 
+            return alignment_collector.state.logits, None
         elif self.cfg['alignment_target'] == 'rep':
-            return alignment_collector.state.rep, 
+            return alignment_collector.state.rep, None
         elif self.cfg['alignment_target'] == 'both':
             return alignment_collector.state.logits, alignment_collector.state.rep
         else:
@@ -850,6 +855,14 @@ if __name__ == '__main__':
         cfg['alignment_target'] = 'both'
 
     print(cfg)
+
+    if cfg['seed'] is None:
+        cfg['seed'] = np.random.randint(0, 0xffff_ffff)
+    np.random.seed(cfg['seed'])
+    torch.manual_seed(cfg['seed'])
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(cfg['seed'])
+    random.seed(cfg['seed'])
 
     global device
     device = "cuda" if torch.cuda.is_available() else "cpu"
