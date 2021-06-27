@@ -23,6 +23,7 @@ import torch.multiprocessing as mp
 from torch.multiprocessing import Pool
 # from multiprocessing.pool import Pool
 import ignite
+import ignite.metrics
 from ignite.engine import (Engine, Events,
                            create_supervised_trainer,
                            create_supervised_evaluator)
@@ -381,7 +382,7 @@ class FedWorker:
         self.setup(torch.load(f"{self.cfg['tmp']}/init_private_optim.pth"))
         print(f"party {self.cfg['rank']}: start 'collab' stage")
 
-        gstep = self.cfg['init_private_epochs']
+        # self.gstep = self.cfg['init_private_epochs']
         res = self.coarse_eval(self.private_dls)
 
         self.teardown(save_optimizer=True)
@@ -437,10 +438,10 @@ class FedWorker:
         if self.cfg['alignment_distillation_loss'] == "KL":
             alignment_loss_fn = KLDivSoftmaxLoss()
 
-        def train_alignment(engine, batch):
+        def train_alignment(_, batch):
             self.model.train()
             self.optimizer.zero_grad()
-            x, target_logits, *rest = util.prepare_batch(batch, device=device)
+            x, target, *rest = util.prepare_batch(batch, device=device)
             local_logits, local_rep = self.model(x, output="both")
             loss = 0
 
@@ -451,8 +452,8 @@ class FedWorker:
                 num = x.size(0)
                 cos_dists = torch.tensor([], device=device)
                 for i in range(num):
-                    tmp = torch.tile(local_rep[i], (num,1))
-                    cos = F.cosine_similarity(tmp, reps).reshape(1,-1)
+                    tmp = torch.tile(local_rep[i], (num, 1))
+                    cos = F.cosine_similarity(tmp, reps).reshape(1, -1)
                     cos_dists = torch.cat((cos_dists, cos), dim=0)
 
                 cos_dists /= self.cfg['contrastive_loss_temperature']
@@ -464,19 +465,19 @@ class FedWorker:
 
                 if self.cfg['alignment_contrastive_loss'].endswith('+distillation'):
                     local_logits = local_logits / self.cfg['alignment_temperature']
-                    loss += alignment_loss_fn(local_logits, target_logits)
+                    loss += alignment_loss_fn(local_logits, target)
 
             else:
                 if self.cfg['alignment_target'] == 'logits' \
                     or self.cfg['alignment_target'] == 'both':
                     local_logits = local_logits / self.cfg['alignment_temperature']
-                    loss += alignment_loss_fn(local_logits, target_logits)
+                    loss += alignment_loss_fn(local_logits, target)
                 if self.cfg['alignment_target'] == 'both':
-                    [target_rep] = rest
+                    [target] = rest
                 if self.cfg['alignment_target'] == 'rep' \
                     or self.cfg['alignment_target'] == 'both':
                     local_rep = local_rep / self.cfg['alignment_temperature']
-                    loss += alignment_loss_fn(local_rep, target_rep)
+                    loss += alignment_loss_fn(local_rep, target)
             loss.backward()
             self.optimizer.step()
             return loss
@@ -516,7 +517,7 @@ class FedWorker:
             self.prev_model = self.prev_model.to(device)
             self.prev_model.eval()
 
-        def train_collab(engine, batch):
+        def train_collab(_, batch):
             self.model.train()
             self.optimizer.zero_grad()
             x, y = util.prepare_batch(batch, device=device)
@@ -684,7 +685,7 @@ def fed_main(cfg):
             res = pool.map(FedWorker.start_collab, workers)
             [workers, res] = list(zip(*res))
 
-            metrics = defaultdict(int)
+            metrics = defaultdict(float)
             for d in res:
                 for k in d:
                     local = k.replace("coarse", "local")
@@ -743,7 +744,7 @@ def fed_main(cfg):
                                    repeat(avg_alignment_targets),
                                    repeat(global_model if cfg['send_global'] else None)))
             [workers, res] = list(zip(*res))
-            metrics = defaultdict(int)
+            metrics = defaultdict(float)
             for d in res:
                 for k in d:
                     local = k.replace("coarse", "local")
@@ -787,7 +788,8 @@ def fed_main(cfg):
                 torch.save(w.model.state_dict(), f"{w.cfg['tmp']}/final.pth")
                 torch.save(None, f"{w.cfg['tmp']}/final_optim.pth")
             util.save_models_to_artifact(cfg, workers, "final",
-                                         {"acc": acc, "loss": loss})
+                                         {"acc": metrics['global/combined_test/acc'],
+                                          "loss": metrics['global/combined_test/loss']})
 
         if "upper" in cfg['stages']:
             print("All parties starting with 'upper'")

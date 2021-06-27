@@ -136,17 +136,18 @@ def concat_tb_files(input_dirs: List[Path]):
                 # os.remove(f)
         comp_files.append(str(comp_file))
 
-def reduce_tb_events(indirs_glob, outdir,
-                     overwrite = False,
-                     reduce_ops = ["mean", "min", "max"]):
+def reduce_tb_events(indirs_glob,
+                     outdir: Union[str, Path],
+                     overwrite: bool = False,
+                     reduce_ops: List[str] = ["mean", "min", "max"]):
     events_dict = load_tb_events(indirs_glob)
     reduced_events = reduce_events(events_dict, reduce_ops)
     write_tb_events(reduced_events, outdir, overwrite)
 
-def reduce_tb_events_from_globs(input_globs: List[Union[Path.glob,List[str]]],
+def reduce_tb_events_from_globs(input_globs,
                                 outdir: str,
-                                overwrite = False,
-                                reduce_ops = ["mean", "min", "max"]):
+                                overwrite: bool = False,
+                                reduce_ops: List[str] = ["mean", "min", "max"]):
     events_dict = {}
     for glob in input_globs:
         run = defaultdict(list)
@@ -171,6 +172,6 @@ def prepare_batch(
         device: Optional[Union[str, torch.device]] = None,
         non_blocking: bool = False
 ) -> Tuple[Union[torch.Tensor, Sequence, Mapping, str, bytes], ...]:
-    return list(map(
+    return tuple(map(
         lambda x: convert_tensor(x, device=device, non_blocking=non_blocking),
         batch))
