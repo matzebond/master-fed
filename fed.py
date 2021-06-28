@@ -617,6 +617,14 @@ def fed_main(cfg):
     print("public classes:", Data.public_train_data.classes)
     print("private classes: ", class_names)
 
+
+    # to mitigate divergence due to loading the indices
+    np.random.seed(cfg['seed'])
+    torch.manual_seed(cfg['seed'])
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(cfg['seed'])
+    random.seed(cfg['seed'])
+
     with Pool(cfg['pool_size'], init_pool_process,
               [dill.dumps(private_dls),
                dill.dumps(private_test_dls),
