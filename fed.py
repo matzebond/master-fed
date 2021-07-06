@@ -96,9 +96,13 @@ def build_parser():
     training.add_argument('--private_training_epochs', default=5, type=int, metavar='EPOCHS',
                           help='number of training epochs on the private data per collaborative round')
     # training.add_argument('--private_training_batch_size', default=5) # TODO not supported
-    training.add_argument('--optim', default='Adam')
-    training.add_argument('--init_public_lr', default=0.0001, type=float, metavar='LR',
-                          help='learning rate (used for every training optimizer)')
+    training.add_argument('--optim', default='Adam', choices=['Adam', 'SGD'])
+    training.add_argument('--optim_lr', default=0.0001, type=float, metavar='LR',
+                          help='learning rate for any training optimizer')
+    training.add_argument('--optim_weight_decay', default=0, type=float, metavar='WD',
+                          help='weight decay rate for any training optimizer')
+
+    # training.add_argument('--init_public_lr', default=0.0001, type=float, metavar='LR', help='learning rate (used for every training optimizer)')
     training.add_argument('--init_public_epochs', default=0, type=int, metavar='EPOCHS',
                           help='number of training epochs on the public data in the initial public training stage')
     training.add_argument('--init_public_batch_size', default=32, type=int,
@@ -212,8 +216,19 @@ class FedWorker:
     def setup(self, optimizer_state=None, writer=True):
         self.model = self.model.to(device)
 
-        self.optimizer = torch.optim.Adam(self.model.parameters(),
-                                          lr=self.cfg['init_public_lr'])
+        if self.cfg['optim'] == 'Adam':
+            self.optimizer = torch.optim.Adam(
+                self.model.parameters(),
+                lr=self.cfg['optim_lr'],
+                weight_decay=self.cfg['optim_weight_decay'])
+        elif self.cfg['optim'] == 'SGD':
+            self.optimizer = torch.optim.SGD(
+                self.model.parameters(),
+                lr=self.cfg['optim_lr'],
+                weight_decay=self.cfg['optim_weight_decay'])
+        else:
+            raise Exception('unknown optimizer ' + self.cfg['optim'])
+
         if optimizer_state is not None:
             self.optimizer.load_state_dict(optimizer_state)
             optim_to(self.optimizer, device)

@@ -33,7 +33,7 @@ cfg.update({
 
     'private_training_epochs': 1,
     'optim': 'Adam',
-    'init_public_lr': 0.001,
+    'optim_lr': 0.001,
     'init_public_epochs': 0,
     'init_public_batch_size': 32,
     'init_private_epochs': 0,
