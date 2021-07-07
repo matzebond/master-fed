@@ -288,6 +288,13 @@ class FedWorker:
         if trainer:
             print(f"{stage} [{trainer.state.epoch:2d}/{trainer.state.max_epochs:2d}]")
 
+            total_loss, *losses = trainer.state.output
+            self.writer.add_scalar("training/loss", total_loss, self.gstep)
+            for i, loss in enumerate(losses):
+                self.writer.add_scalar(f"training/loss_{i+1}", loss, self.gstep)
+            print('running train loss:', total_loss,
+                    '- parts:', *losses)
+
         res = {}
         for name, dl in dls.items():
             title = f"{stage}/{name}" if add_stage else name
@@ -562,7 +569,7 @@ class FedWorker:
 
             loss.backward()
             self.optimizer.step()
-            return loss
+            return loss.detach(), loss_target.detach(), (loss-loss_target).detach()
         collab_tr = Engine(train_collab)
 
         with collab_tr.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
