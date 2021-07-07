@@ -1,6 +1,29 @@
 import torchvision
 from torchvision import datasets, transforms
-from torchvision.transforms import ToTensor, Lambda, Compose
+import torch.nn.functional as F
+
+
+normalize = transforms.Normalize(mean=[x / 255.0 for x in [125.3, 123.0, 113.9]],
+                                 std=[x / 255.0 for x in [63.0, 62.1, 66.7]])
+
+noise_level = 0
+
+transform_train = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Lambda(lambda x: F.pad(
+        x.unsqueeze(0).requires_grad_(False),
+        (4, 4, 4, 4), mode='reflect').data.squeeze()),
+    transforms.ToPILImage(),
+    transforms.ColorJitter(brightness=noise_level),
+    transforms.RandomCrop(32),
+    transforms.RandomHorizontalFlip(),
+    transforms.ToTensor(),
+    normalize
+])
+
+transform_test = transforms.Compose([
+    transforms.ToTensor(),
+    normalize])
 
 # https://www.cs.toronto.edu/~kriz/cifar.html
 # CIFAR-10 dataset consists of 60000 32x32 colour images
@@ -10,13 +33,13 @@ public_train_data = datasets.CIFAR10(
     root="data",
     train=True,
     download=True,
-    transform=ToTensor(),
+    transform=transform_train,
 )
 
 public_test_data = datasets.CIFAR10(
     root="data",
     train=False,
-    transform=ToTensor(),
+    transform=transform_test,
 )
 
 # This dataset is just like the CIFAR-10,
@@ -27,13 +50,13 @@ private_train_data = datasets.CIFAR100(
     root="data",
     train=True,
     download=True,
-    transform=ToTensor(),
+    transform=transform_train,
 )
 
 private_test_data = datasets.CIFAR100(
     root="data",
     train=False,
-    transform=ToTensor(),
+    transform=transform_test,
 )
 
 private_subcats = [
