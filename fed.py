@@ -166,6 +166,13 @@ def build_parser():
     return parser
 
 
+def set_seed(seed):
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+    random.seed(seed)
+
 def init_pool_process(priv_dls, priv_test_dl,
                       combi_dl, combi_test_dl,
                       pub_train_dl, pub_test_dl):
@@ -200,11 +207,7 @@ class FedWorker:
         self.cfg = cfg
         print(f"start run {self.cfg['rank']} in pid {os.getpid()}")
 
-        np.random.seed(cfg['seed'])
-        torch.manual_seed(cfg['seed'])
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed(cfg['seed'])
-        random.seed(cfg['seed'])
+        set_seed(cfg['seed'])
 
         os.makedirs(self.cfg['path'])
         os.makedirs(self.cfg['tmp'])
@@ -634,11 +637,7 @@ def fed_main(cfg):
 
 
     # to mitigate divergence due to loading the indices
-    np.random.seed(cfg['seed'])
-    torch.manual_seed(cfg['seed'])
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(cfg['seed'])
-    random.seed(cfg['seed'])
+    set_seed(cfg['seed'])
 
     with Pool(cfg['pool_size'], init_pool_process,
               [dill.dumps(private_dls),
@@ -884,11 +883,7 @@ if __name__ == '__main__':
 
     if cfg['seed'] is None:
         cfg['seed'] = np.random.randint(0, 0xffff_ffff)
-    np.random.seed(cfg['seed'])
-    torch.manual_seed(cfg['seed'])
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(cfg['seed'])
-    random.seed(cfg['seed'])
+    set_seed(cfg['seed'])
 
     global device
     device = "cuda" if torch.cuda.is_available() else "cpu"
