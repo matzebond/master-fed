@@ -175,7 +175,8 @@ def set_seed(seed):
 
 def init_pool_process(priv_dls, priv_test_dl,
                       combi_dl, combi_test_dl,
-                      pub_train_dl, pub_test_dl):
+                      pub_train_dl, pub_test_dl,
+                      gpus=torch.cuda.device_count()):
     global private_dls, private_test_dls
     private_dls = dill.loads(priv_dls)
     private_test_dls = dill.loads(priv_test_dl)
@@ -186,8 +187,14 @@ def init_pool_process(priv_dls, priv_test_dl,
     public_train_dl = dill.loads(pub_train_dl)
     public_test_dl = dill.loads(pub_test_dl)
 
+
+    worker = mp.current_process()
+    worker_id = worker._identity[0] - 1
     global device
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = torch.device('cpu')
+    if torch.cuda.is_available():
+        gpu_id = worker_id % gpus
+        device = torch.device('cuda', gpu_id)
     print(f"Using device: {device}")
 
 
