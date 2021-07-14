@@ -1,3 +1,10 @@
+import os
+import sys
+import shutil
+from pathlib import Path
+from collections import defaultdict
+from typing import List, Callable, Optional, Dict, Sequence, Union, Tuple, Mapping
+
 import numpy as np
 import torch
 import torchvision
@@ -7,11 +14,6 @@ from tensorboard_reducer import load_tb_events, write_tb_events, reduce_events
 from ignite.utils import convert_tensor
 import matplotlib.pyplot as plt
 import wandb
-from collections import defaultdict
-from pathlib import Path
-import os
-import shutil
-from typing import List, Callable, Optional, Dict, Sequence, Union, Tuple, Mapping
 
 
 def example(model, data, classes, inst):
@@ -175,3 +177,16 @@ def prepare_batch(
     return tuple(map(
         lambda x: convert_tensor(x, device=device, non_blocking=non_blocking),
         batch))
+
+class add_path():
+    def __init__(self, path):
+        self.path = path
+
+    def __enter__(self):
+        sys.path.insert(0, self.path)
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        try:
+            sys.path.remove(self.path)
+        except ValueError:
+            pass

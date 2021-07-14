@@ -1,11 +1,14 @@
 from itertools import cycle
 import numpy as np
 import torch
+import torch.utils.data.dataloader
+import random
 from torch.utils.data import DataLoader, Subset, TensorDataset
 import wandb
+import util
 
 # deprecated
-def clean_round(array: np.array) -> np.array:
+def clean_round(array: np.ndarray) -> np.ndarray:
     rem = 0
     res = np.zeros_like(array, dtype=int)
     for i, item in enumerate(array):
@@ -84,7 +87,7 @@ def partition_by_dist(targets, classes_in_use = range(10), dists = None):
     return idxs
 
 
-def generate_total_indices(targets, classes_in_use = range(10)):
+def generate_total_indices(targets, classes_in_use = range(10)) -> np.ndarray:
     if classes_in_use is None:
         return targets
 
@@ -96,7 +99,7 @@ def generate_total_indices(targets, classes_in_use = range(10)):
 
 
 def get_idx_artifact_name(cfg):
-    if cfg['partition_normalize'] == "party":
+    if cfg['partition_normalize'] == 'party':
         return f"p{cfg['parties']}_s{cfg['samples']}_c{cfg['concentration']}_C{'-'.join(map(str,cfg['classes']))}"
     else:
         return f"p{cfg['parties']}_n{cfg['partition_normalize']}_s{cfg['samples']}_c{cfg['concentration']}_C{'-'.join(map(str,cfg['classes']))}"
@@ -137,10 +140,18 @@ def load_idx_from_artifact(cfg, targets, test_targets):
         print(e)
         print(f'Private Idx: Create "{idx_artifact_name}" artifact with new random private indices')
 
-        idxs, counts, dists = partition_data(
-            targets, cfg['parties'], cfg['classes'],
-            cfg['partition_normalize'], cfg['samples'],
-            cfg['concentration'], cfg['partition_overlap'])
+        if cfg['partition_normalize'] == 'moon':
+            idxs, counts, dists = partition_data_moon(
+                cfg['dataset'], cfg['parties'], cfg['classes'],
+                cfg['partition_normalize'], cfg['samples'],
+                cfg['concentration'], cfg['partition_overlap'])
+        else:
+            idxs, counts, dists = partition_data(
+                targets, cfg['parties'], cfg['classes'],
+                cfg['partition_normalize'], cfg['samples'],
+                cfg['concentration'], cfg['partition_overlap'])
+
+
         test_idxs = partition_by_dist(test_targets, cfg['classes'], dists)
         idx_artifact = save_idx_to_artifact(cfg, idxs, counts, test_idxs)
     except Exception as e:
@@ -199,3 +210,33 @@ def build_private_dls(private_train_data, private_test_data,
                                   collate_fn=collate_fn)
 
     return private_dls, private_test_dls, combined_dl, combined_test_dl
+
+
+
+def get_moon_indices(dataset='CIFAR10', parties = 10, concentration = 0.5):
+    with util.add_path('../master_moon'):
+        import utils as moon_utils
+
+        seed = 0
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(seed)
+        random.seed(seed)
+
+        res = moon_utils.partition_data(dataset.lower(), "data", None, "noniid", parties, beta=concentration)
+    return res
+
+def partition_data_moon(dataset, parties = 10, classes_in_use = range(10),
+                        normalize = "class", samples = None, concentration = 'iid',
+                        data_overlap = False, balance = True):
+    X_train, y_train, X_test, y_test, idx_map, _ = get_moon_indices(dataset, parties, concentration)
+
+    idxs = [np.array(idx_map[i]) for i in idx_map]
+
+    counts = np.zeros((parties, len(classes_in_use)), dtype=int)
+    for i,idx in enumerate(idxs):
+        counts[i] = np.bincount(y_train[idx], minlength=10)
+
+    dists = (np.array([(counts[i] / s) for i,s in enumerate(counts.sum(axis=1))]))
+    return idxs, counts, dists

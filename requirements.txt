@@ -1,3 +1,5 @@
+numpy
+matplotlib
 torch
 torchvision
 pytorch-ignite

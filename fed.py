@@ -81,7 +81,7 @@ def build_parser():
                       help='subset of classes that are used for the private and collaborative training. If empty or not defined all classes of the private dataset are used.')
 
     data.add_argument('--partition_normalize', default='class',
-                      choices=['class', 'party'],
+                      choices=['class', 'party', 'moon'],
                       help='select the target against which to normalize the partition in. Eather all parties or all classes have the same amount of data')
     data.add_argument('--concentration', default=1, type=float_or_string,
                       metavar='BETA',
