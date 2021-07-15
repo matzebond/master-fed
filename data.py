@@ -25,11 +25,14 @@ def partition_data(labels, parties = 10, classes_in_use = range(10),
     elif concentration == 'single_class':
         concentration = 1e-3
 
+    if normalize == 'moon':
+        return partition_moon(labels, parties, classes_in_use, samples, concentration)
+
     if parties < len(classes_in_use):
         print('Too few parties. No balancing of the indices.')
         balance = False
 
-    dists = None
+    dists = np.array([])
     for _ in range(10000):  # dont block infinite when balancing
         if concentration > 0.005:
             dists = np.random.dirichlet(np.repeat(concentration, len(classes_in_use)),
@@ -67,6 +70,54 @@ def partition_data(labels, parties = 10, classes_in_use = range(10),
         counts[:,n] = [ len(i) for i in idx ]
 
     return idxs, counts, dists
+
+
+def partition_moon(labels, parties = 10, classes_in_use = range(10),
+                   samples = None, concentration = 0.5):
+    min_size = 0
+    min_require_size = 1
+    N = labels.shape[0]
+    idx_arr = []
+    idx_batch = [[] for _ in range(parties)]
+
+    while min_size < min_require_size:
+        idx_batch = [[] for _ in range(parties)]
+        for k in classes_in_use:
+            idx_k = np.where(labels == k)[0]
+            if samples:
+                idx_k = idx_k[:samples]
+            np.random.shuffle(idx_k)
+            proportions = np.random.dirichlet(np.repeat(concentration, parties))
+            proportions = np.array([p * (len(idx_j) < N / parties) for p, idx_j \
+                                    in zip(proportions, idx_batch)])
+            proportions = proportions / proportions.sum()
+            proportions = (np.cumsum(proportions) * len(idx_k)).astype(int)[:-1]
+            idx_batch = [idx_j + idx.tolist() for idx_j, idx \
+                            in zip(idx_batch, np.split(idx_k, proportions))]
+            min_size = min([len(idx_j) for idx_j in idx_batch])
+            print(min_size)
+            # if K == 2 and n_parties <= 10:
+            #     if np.min(proportions) < 200:
+            #         min_size = 0
+            #         break
+
+
+    for j in range(parties):
+        np.random.shuffle(idx_batch[j])
+        idx_arr.append(np.array(idx_batch[j]))
+
+    print([x.shape for x in idx_arr])
+
+    all_classes = np.unique(labels).shape[0]
+
+    counts = np.zeros((parties, len(classes_in_use)), dtype=int)
+    for i,idx in enumerate(idx_arr):
+        tmp = np.bincount(labels[idx], minlength=all_classes)
+        for j, c in enumerate(classes_in_use):
+            counts[i][j] = tmp[c]
+
+    dists = (np.array([(counts[i] / s) for i,s in enumerate(counts.sum(axis=1))]))
+    return idx_arr, counts, dists
 
 
 def partition_by_dist(targets, classes_in_use = range(10), dists = None):
@@ -140,16 +191,10 @@ def load_idx_from_artifact(cfg, targets, test_targets):
         print(e)
         print(f'Private Idx: Create "{idx_artifact_name}" artifact with new random private indices')
 
-        if cfg['partition_normalize'] == 'moon':
-            idxs, counts, dists = partition_data_moon(
-                cfg['dataset'], cfg['parties'], cfg['classes'],
-                cfg['partition_normalize'], cfg['samples'],
-                cfg['concentration'], cfg['partition_overlap'])
-        else:
-            idxs, counts, dists = partition_data(
-                targets, cfg['parties'], cfg['classes'],
-                cfg['partition_normalize'], cfg['samples'],
-                cfg['concentration'], cfg['partition_overlap'])
+        idxs, counts, dists = partition_data(
+            targets, cfg['parties'], cfg['classes'],
+            cfg['partition_normalize'], cfg['samples'],
+            cfg['concentration'], cfg['partition_overlap'])
 
 
         test_idxs = partition_by_dist(test_targets, cfg['classes'], dists)
@@ -212,12 +257,11 @@ def build_private_dls(private_train_data, private_test_data,
     return private_dls, private_test_dls, combined_dl, combined_test_dl
 
 
-
-def get_moon_indices(dataset='CIFAR10', parties = 10, concentration = 0.5):
+# deprecated
+def get_moon_indices(dataset='CIFAR10', parties = 10, concentration = 0.5, seed=0):
     with util.add_path('../master_moon'):
         import utils as moon_utils
 
-        seed = 0
         np.random.seed(seed)
         torch.manual_seed(seed)
         if torch.cuda.is_available():
@@ -225,18 +269,16 @@ def get_moon_indices(dataset='CIFAR10', parties = 10, concentration = 0.5):
         random.seed(seed)
 
         res = moon_utils.partition_data(dataset.lower(), "data", None, "noniid", parties, beta=concentration)
-    return res
 
-def partition_data_moon(dataset, parties = 10, classes_in_use = range(10),
-                        normalize = "class", samples = None, concentration = 'iid',
-                        data_overlap = False, balance = True):
-    X_train, y_train, X_test, y_test, idx_map, _ = get_moon_indices(dataset, parties, concentration)
+    labels = res[1]
+    classes = np.unique(labels)
+    idx_map = res[4]
 
     idxs = [np.array(idx_map[i]) for i in idx_map]
 
-    counts = np.zeros((parties, len(classes_in_use)), dtype=int)
+    counts = np.zeros((parties, len(classes)), dtype=int)
     for i,idx in enumerate(idxs):
-        counts[i] = np.bincount(y_train[idx], minlength=10)
+        counts[i] = np.bincount(labels[idx], minlength=10)
 
     dists = (np.array([(counts[i] / s) for i,s in enumerate(counts.sum(axis=1))]))
     return idxs, counts, dists
