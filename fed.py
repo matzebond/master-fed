@@ -187,14 +187,14 @@ def init_pool_process(priv_dls, priv_test_dl,
     public_train_dl = dill.loads(pub_train_dl)
     public_test_dl = dill.loads(pub_test_dl)
 
-
-    worker = mp.current_process()
-    worker_id = worker._identity[0] - 1
     global device
-    device = torch.device('cpu')
     if torch.cuda.is_available():
+        worker = mp.current_process()
+        worker_id = worker._identity[0] - 1 if worker._identity else 0
         gpu_id = worker_id % gpus
         device = torch.device('cuda', gpu_id)
+    else:
+        device = torch.device('cpu')
     print(f"Using device: {device}")
 
 
@@ -295,12 +295,19 @@ class FedWorker:
         if trainer:
             print(f"{stage} [{trainer.state.epoch:2d}/{trainer.state.max_epochs:2d}]")
 
-            total_loss, *losses = trainer.state.output
-            self.writer.add_scalar("training/loss", total_loss, self.gstep)
+            total_loss = torch.tensor(0)
+            losses = []
+            try:
+                total_loss, *losses = trainer.state.output
+            except TypeError:
+                total_loss = trainer.state.output
+
+            title = f"{stage}/training" if add_stage else "training"
+            self.writer.add_scalar(f"{title}/loss", total_loss, self.gstep)
             for i, loss in enumerate(losses):
-                self.writer.add_scalar(f"training/loss_{i+1}", loss, self.gstep)
-            print('running train loss:', total_loss,
-                    '- parts:', *losses)
+                self.writer.add_scalar(f"{title}/loss_{i+1}", loss, self.gstep)
+            print(f"{title} loss:", total_loss.item(),
+                  "- parts:", *[l.item() for l in losses])
 
         res = {}
         for name, dl in dls.items():
@@ -600,12 +607,11 @@ def fed_main(cfg):
                config=cfg, sync_tensorboard=True)
     # wandb.save("./*/*event*", policy = 'end')
     cfg['path'] = Path(wandb.run.dir)
-    cfg['tmp'] = Path("./wandb/tmp/")
-    shutil.rmtree(cfg['tmp'], ignore_errors=True)
+    cfg['tmp'] = cfg['path'] / '..' / 'tmp'
 
-    # wandb.tensorboard.patch(root_logdir=cfg['path']/"files")
+    # wandb.tensorboard.patch(root_logdir=cfg['path'])
 
-    if cfg['dataset'] == 'CIFAR100' or cfg['dataset'] == 'CIFAR':
+    if cfg['dataset'] == 'CIFAR100':
         import CIFAR as Data
     elif cfg['dataset'] == 'CIFAR10':
         import CIFAR as Data
