@@ -15,6 +15,10 @@ cfg = {
     'partition_normalize': 'class',
 
     'private_training_epochs': 10,
+    'init_private_batch_size': 64,
+
+    'upper_bound_epochs': 300,
+    'lower_bound_epochs': 300,
 
     'pool_size': 4,
 }

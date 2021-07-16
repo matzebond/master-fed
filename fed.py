@@ -295,19 +295,19 @@ class FedWorker:
         if trainer:
             print(f"{stage} [{trainer.state.epoch:2d}/{trainer.state.max_epochs:2d}]")
 
-            total_loss = torch.tensor(0)
             losses = []
             try:
                 total_loss, *losses = trainer.state.output
-            except TypeError:
+                total_loss = total_loss.item()
+                losses = [l.item() for l in losses]
+            except Exception:
                 total_loss = trainer.state.output
 
             title = f"{stage}/training" if add_stage else "training"
+            print(f"{title} loss:", total_loss, "- parts:", *losses)
             self.writer.add_scalar(f"{title}/loss", total_loss, self.gstep)
             for i, loss in enumerate(losses):
                 self.writer.add_scalar(f"{title}/loss_{i+1}", loss, self.gstep)
-            print(f"{title} loss:", total_loss.item(),
-                  "- parts:", *[l.item() for l in losses])
 
         res = {}
         for name, dl in dls.items():
