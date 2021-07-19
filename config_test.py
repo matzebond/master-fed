@@ -2,17 +2,17 @@ global cfg
 from config_base import cfg
 
 cfg.update({
-    'parties': 2,
+    'parties': 3,
     'collab_rounds': 5,
     'stages': ['init_public', 'init_private', 'collab'],
 
-    'projection_head': [256],
+    'projection_head': None,
 
     'dataset': 'CIFAR100',
     'classes': [0,2,20,63,71,82],
-    'samples': 3,
-    'concentration': 1,
+    'samples': 20,
     'partition_normalize': 'party',
+    'concentration': 0.5,
 
     'variant': None,
     'keep_prev_model': False,
@@ -42,7 +42,7 @@ cfg.update({
     'upper_bound_epochs': 10,
     'lower_bound_epochs': 10,
 
-    'pool_size': 1,
+    'pool_size': 2,
 })
 
 from itertools import repeat

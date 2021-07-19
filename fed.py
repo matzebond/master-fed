@@ -165,6 +165,8 @@ def build_parser():
                       help='number of processes')
     util.add_argument('--seed', default=0, type=int,
                       help="the seed with which to initialize numpy, torch, cuda and random")
+    util.add_argument('--resumable', action='store_true',
+                      help="resume form the previous run (need to be resumable) if it chrashed")
 
 
     return parser
@@ -608,10 +610,18 @@ class FedWorker:
 def fed_main(cfg):
     # wandb.tensorboard.patch(root_logdir="wandb/latest-run/files")
     wandb.init(project='master-fed', entity='maschm',
-               config=cfg, sync_tensorboard=True)
+               config=cfg, sync_tensorboard=True,
+               resume=cfg['resumable'])
+    print(cfg['resumable'], wandb.run.resumed)
+
     # wandb.save("./*/*event*", policy = 'end')
     cfg['path'] = Path(wandb.run.dir)
     cfg['tmp'] = cfg['path'] / '..' / 'tmp'
+
+    if cfg['resumable']:
+        cfg['tmp'] = Path("./wandb/tmp/")
+        if not wandb.run.resumed:
+            shutil.rmtree(cfg['tmp'], ignore_errors=True)
 
     # wandb.tensorboard.patch(root_logdir=cfg['path'])
 
@@ -662,84 +672,95 @@ def fed_main(cfg):
                dill.dumps(combined_test_dl),
                dill.dumps(public_train_dl),
                dill.dumps(public_test_dl)]) as pool:
-        args = []
-        for i in range(cfg['parties']):
-            w_cfg = cfg.copy()
-            w_cfg['rank'] = i
-            w_cfg['path'] = cfg['path'] / str(i)
-            w_cfg['tmp'] = cfg['tmp'] / str(i)
-            w_cfg['model'] = cfg['model_mapping'][i]
-            w_cfg['architecture'] = FedMD.FedMD_CIFAR.hyper[w_cfg['model']]
-            model = FedMD.FedMD_CIFAR(*w_cfg['architecture'],
-                                      projection = cfg['projection_head'],
-                                      n_classes = cfg['num_private_classes'],
-                                      input_size = (3, 32, 32))
-            args.append((w_cfg, model))
-        workers = pool.starmap(FedWorker, args)
-        del args
-
-        model = copy.deepcopy(workers[0].model)
-        test_input = public_train_data[0][0].unsqueeze(0)
-        macs, params = thop.profile(model, inputs=(test_input, ))
-        print(*thop.clever_format([macs, params], "%.3f"))
-        wandb.config.update({"model": {"macs": macs, "params": params}})
-        del model
-
-        if "init_public" in cfg['stages']:
-            print("All parties starting with 'init_public'")
-            res = pool.map(FedWorker.init_public, workers)
-            [workers, res] = list(zip(*res))
-            [acc, loss] = list(zip(*res))
-            acc, loss = np.average(acc), np.average(loss)
-            wandb.run.summary["init_public/acc"] = acc
-            wandb.run.summary["init_public/loss"] = loss
-            if "save_init_public" in cfg['stages']:
-                util.save_models_to_artifact(cfg, workers, "init_public",
-                                             {"acc": acc, "loss": loss})
-        elif "load_init_public" in cfg['stages']:
-            for w in workers:
-                w.model.change_classes(cfg['num_public_classes'])
-            util.load_models_from_artifact(cfg, workers, "init_public")
-
-        if "init_private" in cfg['stages']:
-            print("All parties starting with 'init_private'")
-            res = pool.map(FedWorker.init_private, workers)
-            [workers, res] = list(zip(*res))
-            [acc, loss] = list(zip(*res))
-            acc, loss = np.average(acc), np.average(loss)
-            wandb.run.summary["init_private/acc"] = acc
-            wandb.run.summary["init_private/loss"] = loss
-            if "save_init_private" in cfg['stages']:
-                util.save_models_to_artifact(cfg, workers, "init_private",
-                                             {"acc": acc, "loss": loss})
-        elif "load_init_private" in cfg['stages']:
-            for w in workers:
-                w.model.change_classes(cfg['num_private_classes'])
-            util.load_models_from_artifact(cfg, workers, "init_private")
-
-
-        if "collab" in cfg['stages']:
-            print("All parties starting with 'collab'")
-            res = pool.map(FedWorker.start_collab, workers)
-            [workers, res] = list(zip(*res))
-
-            metrics = defaultdict(float)
-            for d in res:
-                for k in d:
-                    local = k.replace("coarse", "local")
-                    metrics[local] += d[k]
-            for k in metrics:
-                metrics[k] /= len(res)
-
-            wandb.log(metrics)
-        else:
-            return
-
+        workers = []
         global_model = None
-        if cfg['global_model']:
-            global_model = copy.deepcopy(workers[0].model)
+        start_round = 0
+        if not wandb.run.resumed:
+            args = []
+            for i in range(cfg['parties']):
+                w_cfg = cfg.copy()
+                w_cfg['rank'] = i
+                w_cfg['path'] = cfg['path'] / str(i)
+                w_cfg['tmp'] = cfg['tmp'] / str(i)
+                w_cfg['model'] = cfg['model_mapping'][i]
+                w_cfg['architecture'] = FedMD.FedMD_CIFAR.hyper[w_cfg['model']]
+                model = FedMD.FedMD_CIFAR(*w_cfg['architecture'],
+                                        projection = cfg['projection_head'],
+                                        n_classes = cfg['num_private_classes'],
+                                        input_size = (3, 32, 32))
+                args.append((w_cfg, model))
+            workers = pool.starmap(FedWorker, args)
+            del args
 
-        for n in range(cfg['collab_rounds']):
+            model = copy.deepcopy(workers[0].model)
+            test_input = public_train_data[0][0].unsqueeze(0)
+            macs, params = thop.profile(model, inputs=(test_input, ))
+            print(*thop.clever_format([macs, params], "%.3f"))
+            wandb.config.update({"model": {"macs": macs, "params": params}})
+            del model
+
+            if "init_public" in cfg['stages']:
+                print("All parties starting with 'init_public'")
+                res = pool.map(FedWorker.init_public, workers)
+                [workers, res] = list(zip(*res))
+                [acc, loss] = list(zip(*res))
+                acc, loss = np.average(acc), np.average(loss)
+                wandb.run.summary["init_public/acc"] = acc
+                wandb.run.summary["init_public/loss"] = loss
+                if "save_init_public" in cfg['stages']:
+                    util.save_models_to_artifact(cfg, workers, "init_public",
+                                                {"acc": acc, "loss": loss})
+            elif "load_init_public" in cfg['stages']:
+                for w in workers:
+                    w.model.change_classes(cfg['num_public_classes'])
+                util.load_models_from_artifact(cfg, workers, "init_public")
+
+            if "init_private" in cfg['stages']:
+                print("All parties starting with 'init_private'")
+                res = pool.map(FedWorker.init_private, workers)
+                [workers, res] = list(zip(*res))
+                [acc, loss] = list(zip(*res))
+                acc, loss = np.average(acc), np.average(loss)
+                wandb.run.summary["init_private/acc"] = acc
+                wandb.run.summary["init_private/loss"] = loss
+                if "save_init_private" in cfg['stages']:
+                    util.save_models_to_artifact(cfg, workers, "init_private",
+                                                {"acc": acc, "loss": loss})
+            elif "load_init_private" in cfg['stages']:
+                for w in workers:
+                    w.model.change_classes(cfg['num_private_classes'])
+                util.load_models_from_artifact(cfg, workers, "init_private")
+
+
+            if "collab" in cfg['stages']:
+                print("All parties starting with 'collab'")
+                res = pool.map(FedWorker.start_collab, workers)
+                [workers, res] = list(zip(*res))
+
+                metrics = defaultdict(float)
+                for d in res:
+                    for k in d:
+                        local = k.replace("coarse", "local")
+                        metrics[local] += d[k]
+                for k in metrics:
+                    metrics[k] /= len(res)
+
+                wandb.log(metrics)
+            else:
+                return
+
+            global_model = None
+            if cfg['global_model']:
+                global_model = copy.deepcopy(workers[0].model)
+
+        if wandb.run.resumed:
+            workers = torch.load(cfg['tmp'] / "workers.pt")
+            if cfg['global_model']:
+                global_model = torch.load(cfg['tmp'] / "global.pt")
+            state = torch.load(cfg['tmp'] / "state.pt")
+            start_round = state['round'] + 1
+
+        for n in range(start_round, cfg['collab_rounds']):
             print(f"All parties starting with collab round [{n+1}/{cfg['collab_rounds']}]")
             alignment_data, avg_alignment_targets = None, None
             if cfg['alignment_data']:
@@ -820,6 +841,14 @@ def fed_main(cfg):
                 for w in workers:
                     w.model.load_state_dict(global_model.state_dict())
                 print("local models replaced")
+
+            if cfg['resumable']:
+                torch.save({'round': n}, cfg['tmp'] / "state.pt")
+                torch.save(workers, cfg['tmp'] / "workers.pt")
+                if cfg['global_model']:
+                    torch.save(global_model, cfg['tmp'] / "global.pt")
+                print("saved resuable state for round", n)
+
 
         if "save_final" in cfg['stages']:
             for w in workers:

@@ -8,3 +8,4 @@ tensorboard_reducer
 thop
 dill
 wandb
+umap-learn
