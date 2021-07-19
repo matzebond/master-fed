@@ -1,11 +1,116 @@
 from itertools import cycle
+from collections import OrderedDict
 import numpy as np
 import torch
 import torch.utils.data.dataloader
 import random
+import torch.nn.functional as F
+import torch.nn as nn
 from torch.utils.data import DataLoader, Subset, TensorDataset
+from torchvision import datasets, transforms
 import wandb
+
 import util
+
+# CIFAR-10
+# https://www.cs.toronto.edu/~kriz/cifar.html
+# CIFAR-10 dataset consists of 60000 32x32 colour images
+# in 10 classes, with 6000 images per class.
+# There are 5000 training images and 1000 test images
+
+# CIFAR-100
+# This dataset is just like the CIFAR-10,
+# except it has 100 classes containing 600 images each.
+# There are 500 training images and 100 testing images per class
+# grouped into 20 superclasses
+
+noise_level = 0
+
+augmentation = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Lambda(lambda x: F.pad( # TODO not jittable
+        x.unsqueeze(0).requires_grad_(False),
+        (4, 4, 4, 4), mode='reflect').data.squeeze()),
+    transforms.ToPILImage(),
+    transforms.ColorJitter(brightness=noise_level),
+    transforms.RandomCrop(32),
+    transforms.RandomHorizontalFlip(),
+])
+
+normalization = transforms.Normalize(mean=[x / 255.0 for x in [125.3, 123.0, 113.9]],
+                                     std=[x / 255.0 for x in [63.0, 62.1, 66.7]])
+
+def get_pub_priv(private, public=None, root="data", normalize=True, augment=True):
+    if public is None:
+        if private == "CIFAR10":
+            public = "CIFAR100"
+        elif private == "CIFAR100":
+            public = "CIFAR10"
+
+    transform_train = OrderedDict()
+    transform_test = OrderedDict()
+    if augment:
+        transform_train['augment'] = augmentation
+    transform_train['toTensor'] = transforms.ToTensor()
+    transform_test['toTensor'] = transforms.ToTensor()
+    if normalize:
+        transform_train['normalize'] = normalization
+        transform_test['normalize'] = normalization
+    transform_train = transforms.Compose(list(transform_train.values()))
+    transform_test = transforms.Compose(list(transform_test.values()))
+
+    public = getattr(datasets, public)
+    private = getattr(datasets, private)
+    pub_train = public(
+        root=root,
+        train=True,
+        download=True,
+        transform=transform_train
+    )
+    pub_test = public(
+        root=root,
+        train=False,
+        download=True,
+        transform=transform_test
+    )
+    priv_train = private(
+        root=root,
+        train=True,
+        download=True,
+        transform=transform_train
+    )
+    priv_test = private(
+        root=root,
+        train=False,
+        download=True,
+        transform=transform_test
+    )
+    return pub_train, pub_test, priv_train, priv_test
+
+
+private_subcats = [
+    ("aquatic mammals", ["beaver", "dolphin", "otter", "seal", "whale"]),
+    ("fish", ["aquarium fish", "flatfish", "ray", "shark", "trout"]),
+    ("flowers", ["orchids", "poppies", "roses", "sunflowers", "tulips"]),
+    ("food containers", ["bottles", "bowls", "cans", "cups", "plates"]),
+    ("fruit and vegetables", ["apples", "mushrooms", "oranges", "pears", "sweet peppers"]),
+    ("household electrical devices", ["clock", "computer keyboard", "lamp", "telephone", "television"]),
+    ("household furniture", ["bed", "chair", "couch", "table", "wardrobe"]),
+    ("insects", ["bee", "beetle", "butterfly", "caterpillar", "cockroach"]),
+    ("large carnivores", ["bear", "leopard", "lion", "tiger", "wolf"]),
+    ("large man-made outdoor things", ["bridge", "castle", "house", "road", "skyscraper"]),
+    ("large natural outdoor scenes", ["cloud", "forest", "mountain", "plain", "sea"]),
+    ("large omnivores and herbivores", ["camel", "cattle", "chimpanzee", "elephant", "kangaroo"]),
+    ("medium-sized mammals", ["fox", "porcupine", "possum", "raccoon", "skunk"]),
+    ("non-insect invertebrates", ["crab", "lobster", "snail", "spider", "worm"]),
+    ("people", ["baby", "boy", "girl", "man", "woman"]),
+    ("reptiles", ["crocodile", "dinosaur", "lizard", "snake", "turtle"]),
+    ("small mammals", ["hamster", "mouse", "rabbit", "shrew", "squirrel"]),
+    ("trees", ["maple", "oak", "palm", "pine", "willow"]),
+    ("vehicles 1", ["bicycle", "bus", "motorcycle", "pickup truck", "train"]),
+    ("vehicles 2", ["lawn-mower", "rocket", "streetcar", "tank", "tractor"])
+]
+
 
 # deprecated
 def clean_round(array: np.ndarray) -> np.ndarray:
@@ -25,12 +130,12 @@ def partition_data(labels, parties = 10, classes_in_use = range(10),
     elif concentration == 'single_class':
         concentration = 1e-3
 
-    if normalize == 'moon':
-        return partition_moon(labels, parties, classes_in_use, samples, concentration)
-
     if parties < len(classes_in_use):
         print('Too few parties. No balancing of the indices.')
         balance = False
+
+    if normalize == 'moon':
+        return partition_moon(labels, parties, classes_in_use, samples, concentration)
 
     dists = np.array([])
     for _ in range(10000):  # dont block infinite when balancing
@@ -74,8 +179,12 @@ def partition_data(labels, parties = 10, classes_in_use = range(10),
 
 def partition_moon(labels, parties = 10, classes_in_use = range(10),
                    samples = None, concentration = 0.5):
+    all_classes = np.unique(labels).shape[0]
+    num_classes = len(classes_in_use)
+    num_labels = num_classes * samples if samples else labels.shape[0]
     min_size = 0
-    min_require_size = 1
+    min_require_size = num_labels / (4 * parties)
+    # min_require_size = 1
     N = labels.shape[0]
     idx_arr = []
     idx_batch = [[] for _ in range(parties)]
@@ -94,23 +203,18 @@ def partition_moon(labels, parties = 10, classes_in_use = range(10),
             proportions = (np.cumsum(proportions) * len(idx_k)).astype(int)[:-1]
             idx_batch = [idx_j + idx.tolist() for idx_j, idx \
                             in zip(idx_batch, np.split(idx_k, proportions))]
-            min_size = min([len(idx_j) for idx_j in idx_batch])
-            print(min_size)
+        min_size = min([len(idx_j) for idx_j in idx_batch])
+        print(min_size)
             # if K == 2 and n_parties <= 10:
             #     if np.min(proportions) < 200:
             #         min_size = 0
             #         break
 
-
     for j in range(parties):
         np.random.shuffle(idx_batch[j])
         idx_arr.append(np.array(idx_batch[j]))
 
-    print([x.shape for x in idx_arr])
-
-    all_classes = np.unique(labels).shape[0]
-
-    counts = np.zeros((parties, len(classes_in_use)), dtype=int)
+    counts = np.zeros((parties, num_classes), dtype=int)
     for i,idx in enumerate(idx_arr):
         tmp = np.bincount(labels[idx], minlength=all_classes)
         for j, c in enumerate(classes_in_use):

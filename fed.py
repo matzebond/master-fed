@@ -31,7 +31,7 @@ import thop
 import ast
 
 import FedMD
-from data import load_idx_from_artifact, build_private_dls
+from data import get_pub_priv, load_idx_from_artifact, build_private_dls
 import util
 from nn import (KLDivSoftmaxLoss, avg_params, optim_to)
 
@@ -73,7 +73,7 @@ def build_parser():
     data = parser.add_argument_group('data')
     data.add_argument('--dataset', default='CIFAR100', choices=['CIFAR100', 'CIFAR10'],
                       help='')
-    data.add_argument('--classes', nargs='*', type=int,
+    data.add_argument('--classes', nargs='+', type=int,
                       metavar='CLASS',
                       help='subset of classes that are used for the private and collaborative training. If empty or not defined all classes of the private dataset are used.')
     data.add_argument('--classes-list', type=ast.literal_eval, dest='classes',
@@ -90,6 +90,10 @@ def build_parser():
                       help='if normalizing per class specifies the samples per class chosen from the training dataset. if normalizing per party specifies the samples per party chosen from the training dataset. The default is to use all data and not to sample down.')
     data.add_argument('--partition_overlap', action='store_true',
                       help='')
+    data.add_argument('--no-augmentation', action='store_false', dest="augmentation", help="don't use augmentation in the data preprocessing")
+    data.add_argument('--no-normalization', action='store_false', dest="normalization", help="don't use normalization in the data preprocessing")
+    data.add_argument('--datafolder', default='data', type=str,
+                      help="place of the datasets (will be downloaded if not present)")
 
     # training
     training = parser.add_argument_group('training')
@@ -611,48 +615,40 @@ def fed_main(cfg):
 
     # wandb.tensorboard.patch(root_logdir=cfg['path'])
 
-    if cfg['dataset'] == 'CIFAR100':
-        import CIFAR as Data
-    elif cfg['dataset'] == 'CIFAR10':
-        import CIFAR as Data
-        tmp = Data.public_train_data
-        Data.public_train_data = Data.private_train_data
-        Data.private_train_data = tmp
-        tmp = Data.public_test_data
-        Data.public_test_data = Data.private_test_data
-        Data.private_test_data = tmp
-    else:
-        raise NotImplementedError(f"dataset '{cfg['dataset']}' is unknown")
+    public_train_data, public_test_data, private_train_data, private_test_data = \
+        get_pub_priv(cfg['dataset'], root=cfg['datafolder'],
+                     augment=cfg['augmentation'], normalize=cfg['normalization'])
 
     if cfg['classes'] is None or len(cfg['classes']) == 0:
-        cfg['classes'] = list(range(len(Data.private_train_data.classes)))
-    elif any((True for c in cfg['classes'] \
-              if c >= len(Data.private_train_data.classes))):
-        raise Exception("--classes out of range")
+        cfg['classes'] = list(range(len(private_train_data.classes)))
+    else:
+        for c in cfg['classes']:
+            if c >= len(private_train_data.classes) or c < 0:
+                raise Exception("--classes out of range")
 
-    cfg['num_public_classes'] = len(Data.public_train_data.classes)
+    cfg['num_public_classes'] = len(public_train_data.classes)
     cfg['num_private_classes'] = len(cfg['classes'])
 
     private_idxs, private_test_idxs = load_idx_from_artifact(
         cfg,
-        np.array(Data.private_train_data.targets),
-        np.array(Data.private_test_data.targets),
+        np.array(private_train_data.targets),
+        np.array(private_test_data.targets),
     )
     private_dls, private_test_dls, combined_dl, combined_test_dl = build_private_dls(
-        Data.private_train_data,
-        Data.private_test_data,
+        private_train_data,
+        private_test_data,
         private_idxs, private_test_idxs,
         cfg['classes'],
         cfg['init_private_batch_size']
     )
-    public_train_dl = DataLoader(Data.public_train_data,
+    public_train_dl = DataLoader(public_train_data,
                                  batch_size=cfg['init_public_batch_size'])
-    public_test_dl = DataLoader(Data.public_test_data,
+    public_test_dl = DataLoader(public_test_data,
                                 batch_size=cfg['init_public_batch_size'])
 
     print(f"train {cfg['parties']} models on")
-    class_names = [Data.private_train_data.classes[x] for x in cfg['classes']]
-    print("public classes:", Data.public_train_data.classes)
+    class_names = [private_train_data.classes[x] for x in cfg['classes']]
+    print("public classes:", public_train_data.classes)
     print("private classes: ", class_names)
 
 
@@ -683,7 +679,7 @@ def fed_main(cfg):
         del args
 
         model = copy.deepcopy(workers[0].model)
-        test_input = Data.public_train_data[0][0].unsqueeze(0)
+        test_input = public_train_data[0][0].unsqueeze(0)
         macs, params = thop.profile(model, inputs=(test_input, ))
         print(*thop.clever_format([macs, params], "%.3f"))
         wandb.config.update({"model": {"macs": macs, "params": params}})
@@ -749,17 +745,17 @@ def fed_main(cfg):
             if cfg['alignment_data']:
                 if cfg['alignment_data'] == "public":
                     print(f"Alignment Data: {cfg['alignment_size']} random examples from the public dataset")
-                    alignment_idx = np.random.choice(len(Data.public_train_data),
+                    alignment_idx = np.random.choice(len(public_train_data),
                                                      cfg['alignment_size'],
                                                      replace = False)
-                    alignment_dl = DataLoader(Subset(Data.public_train_data,
+                    alignment_dl = DataLoader(Subset(public_train_data,
                                                      alignment_idx),
                                               batch_size=cfg['alignment_size'])
                     alignment_data, alignment_labels = next(iter(alignment_dl))
                 elif cfg['alignment_data'] == "random":
                     print(f"Alignment Data: {cfg['alignment_size']} random noise inputs")
                     alignment_data = torch.rand([cfg['alignment_size']]
-                                                + list(Data.private_train_data[0][0].shape))
+                                                + list(private_train_data[0][0].shape))
                 else:
                     raise NotImplementedError(f"alignment_data '{cfg['alignment_data']}' is unknown")
 
