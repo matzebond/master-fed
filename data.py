@@ -184,7 +184,7 @@ def partition_moon(labels, parties = 10, classes_in_use = range(10),
     num_labels = num_classes * samples if samples else labels.shape[0]
     min_size = 0
     min_require_size = num_labels / (4 * parties)
-    # min_require_size = 1
+    min_require_size = 10
     N = labels.shape[0]
     idx_arr = []
     idx_batch = [[] for _ in range(parties)]
