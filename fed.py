@@ -333,7 +333,7 @@ class FedWorker:
 
 
     @self_dec
-    def init_public(self):
+    def init_public(self, epochs=None):
         print(f"party {self.cfg['rank']}: start 'init_public' stage")
         self.model.change_classes(self.cfg['num_public_classes'])
         self.gstep = 0
@@ -343,20 +343,22 @@ class FedWorker:
                                             "init_public",
                                             self.public_dls,
                                             add_stage=True):
-            self.trainer.run(public_train_dl, self.cfg['init_public_epochs'])
+            if not epochs:
+                epochs = self.cfg['init_public_epochs']
+            self.trainer.run(public_train_dl, epochs)
 
         torch.save(self.model.state_dict(), f"{self.cfg['tmp']}/init_public.pth")
         torch.save(self.optimizer.state_dict(), f"{self.cfg['tmp']}/init_public_optim.pth")
 
         res = 0, 0
-        if self.cfg['init_public_epochs'] > 0:
+        if epochs > 0:
             res = self.evaluator.state.metrics['acc'], self.evaluator.state.metrics['loss']
         self.teardown()
         return res
 
 
     @self_dec
-    def init_private(self):
+    def init_private(self, epochs=None):
         print(f"party {self.cfg['rank']}: start 'init_private' stage")
         self.model.load_state_dict(torch.load(f"{self.cfg['tmp']}/init_public.pth"))
         self.model.change_classes(self.cfg['num_private_classes'])
@@ -365,20 +367,22 @@ class FedWorker:
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "init_private", self.private_dls):
-            self.trainer.run(self.private_dl, self.cfg['init_private_epochs'])
+            if not epochs:
+                epochs = self.cfg['init_private_epochs']
+            self.trainer.run(self.private_dl, epochs)
 
         torch.save(self.model.state_dict(), f"{self.cfg['tmp']}/init_private.pth")
         torch.save(self.optimizer.state_dict(), f"{self.cfg['tmp']}/init_private_optim.pth")
 
         res = 0, 0
-        if self.cfg['init_public_epochs'] > 0:
+        if epochs > 0:
             res = self.evaluator.state.metrics['acc'], self.evaluator.state.metrics['loss']
         self.teardown()
         return res
 
 
     @self_dec
-    def upper_bound(self):
+    def upper_bound(self, epochs=None):
         self.model.change_classes(self.cfg['num_public_classes'])
         self.model.load_state_dict(torch.load(f"{self.cfg['tmp']}/init_public.pth"))
         self.model.change_classes(self.cfg['num_private_classes'])
@@ -387,11 +391,12 @@ class FedWorker:
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "upper", self.private_dls, add_stage=True):
-            if 'upper_bound_epochs' in self.cfg:
-                epochs = self.cfg['upper_bound_epochs']
-            else:
-                epochs = self.cfg['init_private_epochs'] \
-                    + self.cfg['collab_rounds'] * self.cfg['private_training_epochs']
+            if not epochs:
+                if 'upper_bound_epochs' in self.cfg:
+                    epochs = self.cfg['upper_bound_epochs']
+                else:
+                    epochs = self.cfg['init_private_epochs'] \
+                        + self.cfg['collab_rounds'] * self.cfg['private_training_epochs']
             self.trainer.run(combined_dl, epochs)
 
         res = self.evaluator.state.metrics['acc'], self.evaluator.state.metrics['loss']
@@ -400,17 +405,18 @@ class FedWorker:
 
 
     @self_dec
-    def lower_bound(self):
+    def lower_bound(self, epochs=None):
         self.model.load_state_dict(torch.load(f"{self.cfg['tmp']}/init_private.pth"))
         self.gstep = 0
         self.setup(torch.load(f"{self.cfg['tmp']}/init_private_optim.pth"))
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "lower", self.private_dls, add_stage=True):
-            if 'lower_bound_epochs' in self.cfg:
-                epochs = self.cfg['lower_bound_epochs']
-            else:
-                epochs = self.cfg['collab_rounds'] * self.cfg['private_training_epochs']
+            if not epochs:
+                if 'lower_bound_epochs' in self.cfg:
+                    epochs = self.cfg['lower_bound_epochs']
+                else:
+                    epochs = self.cfg['collab_rounds'] * self.cfg['private_training_epochs']
             self.trainer.run(self.private_dl, epochs)
 
         res = self.evaluator.state.metrics['acc'], self.evaluator.state.metrics['loss']
