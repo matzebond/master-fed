@@ -151,6 +151,9 @@ def build_parser():
                          help='contrastive loss to align the alignment target on the alignment data')
     variant.add_argument('--alignment_size', type=int, metavar='SIZE',
                          help='amount of instances to pick from the data for the alignment')
+    variant.add_argument('--alignment_aggregate', metavar='AGG',
+                         default='mean', choices=['mean', 'first', 'all', 'global'],
+                         help='how to aggregate the alignment outputs of all parties')
     variant.add_argument('--alignment_matching_epochs', type=int,
                          metavar='EPOCHS',
                          help='number of training epoch on the alignment data per collaborative round')
@@ -463,134 +466,90 @@ class FedWorker:
         self.teardown()
 
         if self.cfg['alignment_target'] == 'logits':
-            return alignment_collector.state.logits, None
+            return {'logits': alignment_collector.state.logits}
         elif self.cfg['alignment_target'] == 'rep':
-            return alignment_collector.state.rep, None
+            return {'rep': alignment_collector.state.rep}
         elif self.cfg['alignment_target'] == 'both':
-            return alignment_collector.state.logits, alignment_collector.state.rep
+            return {'logits': alignment_collector.state.logits,
+                    'rep': alignment_collector.state.rep}
         else:
             raise NotImplementedError(f"alignment_target '{self.cfg['alignment_target']}' is unknown")
 
 
-    def alignment_prep(self, alignment_data, alignment_targets):
-        alignment_loss_fn = None
-        if self.cfg['alignment_distillation_loss'] == "MSE":
-            alignment_loss_fn = nn.MSELoss()
-        if self.cfg['alignment_distillation_loss'] == "L1":
-            alignment_loss_fn = nn.L1Loss()
-        if self.cfg['alignment_distillation_loss'] == "SmoothL1":
-            alignment_loss_fn = nn.SmoothL1Loss()
-        if self.cfg['alignment_distillation_loss'] == "KL":
-            alignment_loss_fn = KLDivSoftmaxLoss()
+    def train_alignment(self, _, batch):
+        self.model.train()
+        self.optimizer.zero_grad()
+        x, y, targets = util.prepare_batch(batch, device=device)
+        local_logits, local_rep = self.model(x, output="both")
+        loss = torch.tensor(0, device=device, dtype=torch.long)
 
-        def train_alignment(_, batch):
-            self.model.train()
-            self.optimizer.zero_grad()
-            x, target, *rest = util.prepare_batch(batch, device=device)
-            local_logits, local_rep = self.model(x, output="both")
-            loss = 0
+        if self.cfg['alignment_contrastive_loss'] and \
+            self.cfg['alignment_contrastive_loss'].startswith('contrastive'):
+            num = x.size(0)
+            cos_dists = torch.tensor([], device=device)
+            for i in range(num):
+                tmp = torch.tile(local_rep[i], (num, 1))
+                cos = F.cosine_similarity(tmp, targets['rep']).reshape(1, -1)
+                cos_dists = torch.cat((cos_dists, cos), dim=0)
 
-            if self.cfg['alignment_contrastive_loss'] and \
-               self.cfg['alignment_contrastive_loss'].startswith('contrastive'):
-                [reps] = rest
+            cos_dists /= self.cfg['contrastive_loss_temperature']
 
-                num = x.size(0)
-                cos_dists = torch.tensor([], device=device)
-                for i in range(num):
-                    tmp = torch.tile(local_rep[i], (num, 1))
-                    cos = F.cosine_similarity(tmp, reps).reshape(1, -1)
-                    cos_dists = torch.cat((cos_dists, cos), dim=0)
+            labels = torch.tensor(range(num), device=device, dtype=torch.long)
+            loss_contrastive = F.cross_entropy(cos_dists, labels)
+            loss = loss + self.cfg['contrastive_loss_weight'] * loss_contrastive
 
-                cos_dists /= self.cfg['contrastive_loss_temperature']
-
-                labels = torch.tensor(range(num), device=device, dtype=torch.long)
-                loss_contrastive = F.cross_entropy(cos_dists, labels)
-                loss += self.cfg['contrastive_loss_weight'] * loss_contrastive
-
-
-                if self.cfg['alignment_contrastive_loss'].endswith('+distillation'):
-                    local_logits = local_logits / self.cfg['alignment_temperature']
-                    loss += alignment_loss_fn(local_logits, target)
-
-            else:
-                if self.cfg['alignment_target'] == 'logits' \
-                    or self.cfg['alignment_target'] == 'both':
-                    local_logits = local_logits / self.cfg['alignment_temperature']
-                    loss += alignment_loss_fn(local_logits, target)
-                if self.cfg['alignment_target'] == 'both':
-                    [target] = rest
-                if self.cfg['alignment_target'] == 'rep' \
-                    or self.cfg['alignment_target'] == 'both':
-                    local_rep = local_rep / self.cfg['alignment_temperature']
-                    loss += alignment_loss_fn(local_rep, target)
-            loss.backward()
-            self.optimizer.step()
-            return loss
-
-        alignment_tr = Engine(train_alignment)
-
-        if self.cfg['alignment_target'] == 'both':
-            alignment_ds = TensorDataset(alignment_data,
-                                         alignment_targets[0], alignment_targets[1])
         else:
-            alignment_ds = TensorDataset(alignment_data, alignment_targets)
-        # return train_alignment, 
+            if self.cfg['alignment_target'] == 'logits' \
+                or self.cfg['alignment_target'] == 'both':
+                local_logits = local_logits / self.cfg['alignment_temperature']
+                loss = loss + self.alignment_loss_fn(local_logits, targets['logits'])
+            if self.cfg['alignment_target'] == 'rep' \
+                or self.cfg['alignment_target'] == 'both':
+                local_rep = local_rep / self.cfg['alignment_temperature']
+                loss = loss + self.alignment_loss_fn(local_rep, targets['rep'])
 
-        return alignment_tr, alignment_ds
+        if self.cfg['alignment_contrastive_loss'].endswith('+distillation'):
+            local_logits = local_logits / self.cfg['alignment_temperature']
+            loss = loss + self.alignment_loss_fn(local_logits, targets['logits'])
 
+        loss.backward()
+        self.optimizer.step()
+        return loss
 
     @self_dec
-    def collab_round(self, alignment_data = None, alignment_targets = None,
-                     global_model = None):
+    def collab_round(self, alignment_data=None, alignment_labels=None,
+                     alignment_targets=None, global_model=None):
         self.setup(self.optim_state)
 
         if alignment_data != None and alignment_targets != None:
-            alignment_tr, alignment_ds = self.alignment_prep(alignment_data,
-                                                             alignment_targets)
+            self.alignment_loss_fn = None
+            if self.cfg['alignment_distillation_loss'] == "MSE":
+                self.alignment_loss_fn = nn.MSELoss()
+            if self.cfg['alignment_distillation_loss'] == "L1":
+                self.alignment_loss_fn = nn.L1Loss()
+            if self.cfg['alignment_distillation_loss'] == "SmoothL1":
+                self.alignment_loss_fn = nn.SmoothL1Loss()
+            if self.cfg['alignment_distillation_loss'] == "KL":
+                self.alignment_loss_fn = KLDivSoftmaxLoss()
+            alignment_ds = MyTensorDataset(alignment_data, alignment_labels,
+                                           alignment_targets)
             alignment_dl = DataLoader(alignment_ds, shuffle=True,
                                       batch_size=self.cfg['alignment_matching_batch_size'])
+            alignment_tr = Engine(self.train_alignment)
             with alignment_tr.add_event_handler(Events.EPOCH_COMPLETED,
                                                         self.evaluate,
                                                         "alignment", self.private_dls):
                 alignment_tr.run(alignment_dl, self.cfg['alignment_matching_epochs'])
-
+            del self.alignment_loss_fn
 
         if global_model:
-            global_model = global_model.to(device)
-            global_model.eval()
+            self.global_model = global_model.to(device)
+            self.global_model.eval()
         if self.prev_model:
             self.prev_model = self.prev_model.to(device)
             self.prev_model.eval()
 
-        def train_collab(_, batch):
-            self.model.train()
-            self.optimizer.zero_grad()
-            x, y = util.prepare_batch(batch, device=device)
-            local_logits, local_rep = self.model(x, output='both')
-            loss = 0
-
-            loss_target = F.cross_entropy(local_logits, y)
-            loss += loss_target
-
-            if self.cfg['contrastive_loss'] == 'moon' and self.prev_model:
-                global_rep = global_model(x, output='rep_only')
-                prev_rep = self.prev_model(x, output='rep_only')
-
-                pos = F.cosine_similarity(local_rep, global_rep, dim=-1).reshape(-1,1)
-                neg = F.cosine_similarity(local_rep, prev_rep, dim=-1).reshape(-1,1)
-
-                logits = torch.cat((pos, neg), dim=1)
-                logits /= self.cfg['contrastive_loss_temperature']
-
-                # first "class" sim(global_rep) is the ground truth
-                labels = torch.zeros(x.size(0), device=device).long()
-                loss_moon = F.cross_entropy(logits, labels)
-                loss += self.cfg['contrastive_loss_weight'] * loss_moon
-
-            loss.backward()
-            self.optimizer.step()
-            return loss.detach(), loss_target.detach(), (loss-loss_target).detach()
-        collab_tr = Engine(train_collab)
+        collab_tr = Engine(self.train_collab)
 
         with collab_tr.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "private_training", self.private_dls):
@@ -602,9 +561,42 @@ class FedWorker:
         if self.cfg['keep_prev_model']:
             del self.prev_model
             self.prev_model = copy.deepcopy(self.model)
+        if global_model:
+            del self.global_model
         return res
 
 
+    def train_collab(self, _, batch):
+        self.model.train()
+        self.optimizer.zero_grad()
+        x, y = util.prepare_batch(batch, device=device)
+        local_logits, local_rep = self.model(x, output='both')
+        loss = torch.tensor(0, device=device, dtype=torch.long)
+
+        loss_target = F.cross_entropy(local_logits, y)
+        loss += loss_target
+
+        if self.cfg['contrastive_loss'] == 'moon' and self.prev_model:
+            global_rep = self.global_model(x, output='rep_only')
+            prev_rep = self.prev_model(x, output='rep_only')
+
+            pos = F.cosine_similarity(local_rep, global_rep, dim=-1).reshape(-1,1)
+            neg = F.cosine_similarity(local_rep, prev_rep, dim=-1).reshape(-1,1)
+
+            logits = torch.cat((pos, neg), dim=1)
+            logits /= self.cfg['contrastive_loss_temperature']
+
+            # first "class" sim(global_rep) is the ground truth
+            labels = torch.zeros(x.size(0), device=device).long()
+            loss_moon = F.cross_entropy(logits, labels)
+            loss = loss + self.cfg['contrastive_loss_weight'] * loss_moon
+
+        if self.cfg['contrastive_loss'] == 'lpp':
+            pass
+
+        loss.backward()
+        self.optimizer.step()
+        return loss.detach(), loss_target.detach(), (loss-loss_target).detach()
 
 
 def fed_main(cfg):
@@ -762,7 +754,7 @@ def fed_main(cfg):
 
         for n in range(start_round, cfg['collab_rounds']):
             print(f"All parties starting with collab round [{n+1}/{cfg['collab_rounds']}]")
-            alignment_data, avg_alignment_targets = None, None
+            alignment_data, alignment_labels, agg_alignment_targets = None, None, {}
             if cfg['alignment_data']:
                 if cfg['alignment_data'] == "public":
                     print(f"Alignment Data: {cfg['alignment_size']} random examples from the public dataset")
@@ -782,25 +774,26 @@ def fed_main(cfg):
 
                 res = pool.starmap(FedWorker.get_alignment,
                                    zip(workers, repeat(alignment_data)))
-                alignment_targets, *rest = list(zip(*res))
+                assert len(res) > 0
 
-                avg_alignment_targets = torch.zeros_like(alignment_targets[0])
-                for t in alignment_targets:
-                    avg_alignment_targets += t
-                avg_alignment_targets /= len(alignment_targets)
-
-                if cfg['alignment_target'] == "both":
-                    [reps] = rest
-                    avg_reps = torch.zeros_like(reps[0])
-                    for r in reps:
-                        avg_reps += r
-                    avg_reps /= len(reps)
-                    avg_alignment_targets = avg_alignment_targets, avg_reps
+                for key in res[0]:
+                    tmp = tuple(r[key] for r in res)
+                    agg_alignment_targets[key] = torch.zeros_like(tmp[0])
+                    if cfg['alignment_aggregate'] == "mean":
+                        for t in tmp:
+                            agg_alignment_targets[key] += t
+                        agg_alignment_targets[key] /= len(tmp)
+                    elif cfg['alignment_aggregate'] == "first":
+                        agg_alignment_targets[key] = tmp[0]
+                    elif cfg['alignment_aggregate'] == "sum":
+                        for t in tmp:
+                            agg_alignment_targets[key] += t
 
             res = pool.starmap(FedWorker.collab_round,
                                zip(workers,
                                    repeat(alignment_data),
-                                   repeat(avg_alignment_targets),
+                                   repeat(alignment_labels),
+                                   repeat(agg_alignment_targets),
                                    repeat(global_model if cfg['send_global'] else None)))
             [workers, res] = list(zip(*res))
             metrics = defaultdict(float)

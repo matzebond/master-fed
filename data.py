@@ -70,7 +70,7 @@ def get_pub_priv(private, public=None, root="data", normalize=True, augment=True
     pub_test = public(
         root=root,
         train=False,
-        download=True,
+        download=False,
         transform=transform_test
     )
     priv_train = private(
@@ -82,7 +82,7 @@ def get_pub_priv(private, public=None, root="data", normalize=True, augment=True
     priv_test = private(
         root=root,
         train=False,
-        download=True,
+        download=False,
         transform=transform_test
     )
     return pub_train, pub_test, priv_train, priv_test
@@ -278,9 +278,9 @@ def save_idx_to_artifact(cfg, idxs, counts, test_idxs):
                                         'class_total': counts.sum(axis=0),
                                         'party_total': counts.sum(axis=1)})
     with idx_artifact.new_file('idxs.npy', 'xb') as f:
-        np.save(f, idxs)
+        np.save(f, np.array(idxs, dtype=object))
     with idx_artifact.new_file('test_idxs.npy', 'xb') as f:
-        np.save(f, test_idxs)
+        np.save(f, np.array(test_idxs, dtype=object))
     wandb.log_artifact(idx_artifact)
     return idx_artifact
 

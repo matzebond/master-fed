@@ -3,10 +3,17 @@ import sys
 import shutil
 from pathlib import Path
 from collections import defaultdict
-from typing import List, Callable, Optional, Dict, Sequence, Union, Tuple, Mapping
+from typing import (
+    List, Callable, Optional, Dict, Sequence, Iterable,
+    Union, Tuple, Mapping, Any, Set,
+    Generator, TypeVar   
+)
+
 
 import numpy as np
 import torch
+from torch import Tensor
+from torch.utils.data.dataset import Dataset
 import torchvision
 from torchvision import datasets, transforms
 from torchvision.transforms import ToTensor, Lambda, Compose
@@ -170,7 +177,7 @@ def reduce_tb_events_from_globs(input_globs,
     # return reduced_events
 
 def prepare_batch(
-        batch: Sequence[torch.Tensor],
+        batch: Sequence[Union[torch.Tensor, Sequence[Tensor], Mapping[Any, Tensor]]],
         device: Optional[Union[str, torch.device]] = None,
         non_blocking: bool = False
 ) -> Tuple[Union[torch.Tensor, Sequence, Mapping, str, bytes], ...]:
@@ -190,3 +197,50 @@ class add_path():
             sys.path.remove(self.path)
         except ValueError:
             pass
+
+tensor_or_mapping = Union[Tensor, Mapping[Any, Tensor]]
+class MyTensorDataset(Dataset[Tuple[tensor_or_mapping, ...]]):
+    r"""Dataset wrapping tensors and dicts of tensors.
+
+    Each sample will be retrieved by indexing tensors along the first dimension.
+
+    Args:
+        *tensors (Tensor): tensors that have the same size of the first dimension.
+    """
+    tensors: Tuple[tensor_or_mapping, ...]
+    sizes: Tuple[int, ...]
+    T = TypeVar('T')
+
+    def __init__(self, *tensors: Union[Tensor, Mapping[Any, Tensor]]) -> None:
+        self.sizes = tuple(self._flatten(map(self._to_size, tensors)))
+        assert all(self.sizes[0] == size for size in self.sizes), "Size mismatch between tensors"
+        self.tensors = tensors
+
+    @staticmethod
+    def _to_size(el: tensor_or_mapping) -> Union[int, Mapping[Any, int]]:
+        if isinstance(el, Tensor):
+            return el.size(0)
+        elif isinstance(el, Mapping):
+            return {k:v.size(0) for k,v in el.items()}
+
+    @staticmethod
+    def _get_item(el: tensor_or_mapping, index) -> Union[Tensor, Mapping[Any, Tensor]]:
+        if isinstance(el, Tensor):
+            return el[index]
+        elif isinstance(el, Mapping):
+            return {k:v[index] for k,v in el.items()}
+
+    @staticmethod
+    def _flatten(dat: Iterable[Union[T, Mapping[Any, T]]]) -> Generator[T, None, None]:
+        for el in dat:
+            if isinstance(el, Mapping):
+                for i in el.values():
+                    yield i
+            else:
+                yield el
+
+    def __getitem__(self, index):
+        return tuple((self._get_item(el, index) for el in self.tensors))
+
+    def __len__(self):
+        return self.sizes[0]
