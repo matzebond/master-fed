@@ -33,6 +33,7 @@ import ast
 import FedMD
 from data import get_pub_priv, load_idx_from_artifact, build_private_dls
 import util
+from util import MyTensorDataset, set_seed
 from nn import (KLDivSoftmaxLoss, avg_params, optim_to)
 
 
@@ -174,13 +175,6 @@ def build_parser():
 
     return parser
 
-
-def set_seed(seed):
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed(seed)
-    random.seed(seed)
 
 def init_pool_process(priv_dls, priv_test_dl,
                       combi_dl, combi_test_dl,

@@ -9,7 +9,7 @@ from typing import (
     Generator, TypeVar   
 )
 
-
+import random
 import numpy as np
 import torch
 from torch import Tensor
@@ -22,6 +22,13 @@ from ignite.utils import convert_tensor
 import matplotlib.pyplot as plt
 import wandb
 
+
+def set_seed(seed):
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+    random.seed(seed)
 
 def example(model, data, classes, inst):
     model.eval()
