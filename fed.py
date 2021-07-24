@@ -30,7 +30,7 @@ from ignite.engine import (Engine, Events,
 import thop
 import ast
 
-import FedMD
+import models
 from data import get_pub_priv, load_idx_from_artifact, build_private_dls
 import util
 from util import MyTensorDataset, set_seed
@@ -63,7 +63,7 @@ def build_parser():
 
     # model
     model = parser.add_argument_group('model')
-    model.add_argument('--model_variant', default='FedMD_CIFAR', choices=['FedMD_CIFAR'],
+    model.add_argument('--model_variant', default='FedMD_CIFAR', choices=['FedMD_CIFAR', 'LLP', 'LeNet++'],
                        help='')
     model.add_argument('--model_mapping', nargs='*', type=int,
                        help='')
@@ -675,11 +675,12 @@ def fed_main(cfg):
                 w_cfg['path'] = cfg['path'] / str(i)
                 w_cfg['tmp'] = cfg['tmp'] / str(i)
                 w_cfg['model'] = cfg['model_mapping'][i]
-                w_cfg['architecture'] = FedMD.FedMD_CIFAR.hyper[w_cfg['model']]
-                model = FedMD.FedMD_CIFAR(*w_cfg['architecture'],
-                                        projection = cfg['projection_head'],
-                                        n_classes = cfg['num_private_classes'],
-                                        input_size = (3, 32, 32))
+                model = getattr(models, cfg['model_variant'])
+                w_cfg['architecture'] = model.hyper[w_cfg['model']]
+                model = model(*w_cfg['architecture'],
+                              projection = cfg['projection_head'],
+                              n_classes = cfg['num_private_classes'],
+                              input_size = (3, 32, 32))
                 args.append((w_cfg, model))
             workers = pool.starmap(FedWorker, args)
             del args
