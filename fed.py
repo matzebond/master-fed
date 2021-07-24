@@ -91,8 +91,10 @@ def build_parser():
                       help='if normalizing per class specifies the samples per class chosen from the training dataset. if normalizing per party specifies the samples per party chosen from the training dataset. The default is to use all data and not to sample down.')
     data.add_argument('--partition_overlap', action='store_true',
                       help='')
-    data.add_argument('--no-augmentation', action='store_false', dest="augmentation", help="don't use augmentation in the data preprocessing")
-    data.add_argument('--no-normalization', action='store_false', dest="normalization", help="don't use normalization in the data preprocessing")
+    data.add_argument('--no-augmentation', action='store_false', dest="augmentation",
+                      help="don't use augmentation in the data preprocessing")
+    data.add_argument('--no-normalization', action='store_false', dest="normalization",
+                      help="don't use normalization in the data preprocessing")
     data.add_argument('--datafolder', default='data', type=str,
                       help="place of the datasets (will be downloaded if not present)")
 

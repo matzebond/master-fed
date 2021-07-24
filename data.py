@@ -35,15 +35,18 @@ augmentation = transforms.Compose([
     transforms.RandomHorizontalFlip(),
 ])
 
-normalization = transforms.Normalize(mean=[x / 255.0 for x in [125.3, 123.0, 113.9]],
-                                     std=[x / 255.0 for x in [63.0, 62.1, 66.7]])
-
 def get_pub_priv(private, public=None, root="data", normalize=True, augment=True):
     if public is None:
         if private == "CIFAR10":
             public = "CIFAR100"
         elif private == "CIFAR100":
             public = "CIFAR10"
+
+    if normalize == True and private.startswith('CIFAR'):
+        normalize = {'mean': [x / 255.0 for x in [125.3, 123.0, 113.9]],
+                        'std': [x / 255.0 for x in [63.0, 62.1, 66.7]]}
+    if normalize == True and private == 'MNIST':
+        normalize = {'mean': (0.1307,), 'std': (0.3081,)}
 
     transform_train = OrderedDict()
     transform_test = OrderedDict()
@@ -52,6 +55,8 @@ def get_pub_priv(private, public=None, root="data", normalize=True, augment=True
     if augment:
         transform_train['augment'] = augmentation
     if normalize:
+        normalization = transforms.Normalize(mean=normalize['mean'],
+                                             std=normalize['std'])
         transform_train['normalize'] = normalization
         transform_test['normalize'] = normalization
     transform_train = transforms.Compose(list(transform_train.values()))
