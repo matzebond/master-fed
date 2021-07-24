@@ -27,11 +27,9 @@ import util
 noise_level = 0
 
 augmentation = transforms.Compose([
-    transforms.ToTensor(),
     transforms.Lambda(lambda x: F.pad( # TODO not jittable
         x.unsqueeze(0).requires_grad_(False),
         (4, 4, 4, 4), mode='reflect').data.squeeze()),
-    transforms.ToPILImage(),
     transforms.ColorJitter(brightness=noise_level),
     transforms.RandomCrop(32),
     transforms.RandomHorizontalFlip(),
@@ -49,10 +47,10 @@ def get_pub_priv(private, public=None, root="data", normalize=True, augment=True
 
     transform_train = OrderedDict()
     transform_test = OrderedDict()
-    if augment:
-        transform_train['augment'] = augmentation
     transform_train['toTensor'] = transforms.ToTensor()
     transform_test['toTensor'] = transforms.ToTensor()
+    if augment:
+        transform_train['augment'] = augmentation
     if normalize:
         transform_train['normalize'] = normalization
         transform_test['normalize'] = normalization

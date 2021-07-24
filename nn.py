@@ -9,7 +9,7 @@ import copy
 from typing import List, Callable, Optional, Dict, Sequence, Union, Tuple, Mapping
 
 
-def avg_params(models: List[nn.Module]) -> Dict[str, Tensor]:
+def avg_params(models: Sequence[nn.Module]) -> Mapping[str, Tensor]:
     assert len(models) > 0
 
     global_weights = copy.deepcopy(models[0].state_dict())
