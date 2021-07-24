@@ -44,6 +44,11 @@ def build_parser():
         except:
             return string
 
+    def alignment_size_type(string):
+        if string == "full":
+            return "full"
+        return int(string)
+
     parser = argparse.ArgumentParser(
         usage='%(prog)s [path/default_config_file.py] [options]'
     )
@@ -152,7 +157,7 @@ def build_parser():
     variant.add_argument('--alignment_contrastive_loss',
                          choices=['contrastive', 'constrastive+distillation'],
                          help='contrastive loss to align the alignment target on the alignment data')
-    variant.add_argument('--alignment_size', type=int, metavar='SIZE',
+    variant.add_argument('--alignment_size', type=alignment_size_type, metavar='SIZE',
                          help='amount of instances to pick from the data for the alignment')
     variant.add_argument('--alignment_aggregate', metavar='AGG',
                          default='mean', choices=['mean', 'first', 'all', 'global'],
@@ -760,14 +765,19 @@ def fed_main(cfg):
             alignment_data, alignment_labels, agg_alignment_targets = None, None, {}
             if cfg['alignment_data']:
                 if cfg['alignment_data'] == "public":
-                    print(f"Alignment Data: {cfg['alignment_size']} random examples from the public dataset")
-                    alignment_idx = np.random.choice(len(public_train_data),
-                                                     cfg['alignment_size'],
-                                                     replace = False)
-                    alignment_dl = DataLoader(Subset(public_train_data,
-                                                     alignment_idx),
-                                              batch_size=cfg['alignment_size'])
-                    alignment_data, alignment_labels = next(iter(alignment_dl))
+                    if cfg['alignment_size'] == "full":
+                        print(f"Alignment Data: all {len(public_train_data)} examples from the public dataset")
+                        alignment_data, alignment_labels = list(zip(*public_train_data))
+                        alignment_data = torch.stack(alignment_data)
+                        alignment_labels = torch.tensor(alignment_labels)
+                    else:
+                        print(f"Alignment Data: {cfg['alignment_size']} random examples from the public dataset")
+                        idxs = np.random.choice(len(public_train_data),
+                                                cfg['alignment_size'],
+                                                replace = False)
+                        alignment_dl = DataLoader(Subset(public_train_data, idxs),
+                                                  batch_size=cfg['alignment_size'])
+                        alignment_data, alignment_labels = next(iter(alignment_dl))
                 elif cfg['alignment_data'] == "random":
                     print(f"Alignment Data: {cfg['alignment_size']} random noise inputs")
                     alignment_data = torch.rand([cfg['alignment_size']]
