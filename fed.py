@@ -77,7 +77,9 @@ def build_parser():
 
     # data
     data = parser.add_argument_group('data')
-    data.add_argument('--dataset', default='CIFAR100', choices=['CIFAR100', 'CIFAR10'],
+    data.add_argument('--dataset', default='CIFAR100', choices=['CIFAR100', 'CIFAR10', 'MNIST'],
+                      help='')
+    data.add_argument('--public_dataset', default=None, choices=['CIFAR100', 'CIFAR10', 'MNIST', 'same'],
                       help='')
     data.add_argument('--classes', nargs='+', type=int,
                       metavar='CLASS',
@@ -653,8 +655,11 @@ def fed_main(cfg):
     # wandb.tensorboard.patch(root_logdir=cfg['path'])
 
     public_train_data, public_test_data, private_train_data, private_test_data = \
-        get_pub_priv(cfg['dataset'], root=cfg['datafolder'],
-                     augment=cfg['augmentation'], normalize=cfg['normalization'])
+        get_pub_priv(
+            cfg['dataset'],
+            public=cfg['public_dataset'] if cfg['public_dataset'] != 'same' else None,
+            root=cfg['datafolder'],
+            augment=cfg['augmentation'], normalize=cfg['normalization'])
 
     if cfg['classes'] is None or len(cfg['classes']) == 0:
         cfg['classes'] = list(range(len(private_train_data.classes)))
@@ -671,6 +676,9 @@ def fed_main(cfg):
         np.array(private_train_data.targets),
         np.array(private_test_data.targets),
     )
+
+    global private_dls, private_test_dls
+    global combined_dl, combined_test_dl
     private_dls, private_test_dls, combined_dl, combined_test_dl = build_private_dls(
         private_train_data,
         private_test_data,
@@ -678,10 +686,15 @@ def fed_main(cfg):
         cfg['classes'],
         cfg['init_private_batch_size']
     )
-    public_train_dl = DataLoader(public_train_data,
-                                 batch_size=cfg['init_public_batch_size'])
-    public_test_dl = DataLoader(public_test_data,
-                                batch_size=cfg['init_public_batch_size'])
+    global public_train_dl, public_test_dl
+    if cfg['public_dataset'] == 'same':
+        public_train_dl = combined_dl
+        public_test_dl = combined_test_dl
+    else:
+        public_train_dl = DataLoader(public_train_data,
+                                     batch_size=cfg['init_public_batch_size'])
+        public_test_dl = DataLoader(public_test_data,
+                                    batch_size=cfg['init_public_batch_size'])
 
     print(f"train {cfg['parties']} models on")
     class_names = [private_train_data.classes[x] for x in cfg['classes']]
