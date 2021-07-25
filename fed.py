@@ -816,22 +816,24 @@ def fed_main(cfg):
                 else:
                     raise NotImplementedError(f"alignment_data '{cfg['alignment_data']}' is unknown")
 
-                res = pool.starmap(FedWorker.get_alignment,
-                                   zip(workers, repeat(alignment_data)))
-                assert len(res) > 0
+                if cfg['alignment_aggregate'] == "global":
+                    agg_alignment_targets = global_worker.get_alignment(alignment_data)
+                else:
+                    res = pool.starmap(FedWorker.get_alignment,
+                                       zip(workers, repeat(alignment_data)))
+                    assert len(res) > 0
 
-                for key in res[0]:
-                    tmp = tuple(r[key] for r in res)
-                    agg_alignment_targets[key] = torch.zeros_like(tmp[0])
-                    if cfg['alignment_aggregate'] == "mean":
-                        for t in tmp:
-                            agg_alignment_targets[key] += t
-                        agg_alignment_targets[key] /= len(tmp)
-                    elif cfg['alignment_aggregate'] == "first":
-                        agg_alignment_targets[key] = tmp[0]
-                    elif cfg['alignment_aggregate'] == "sum":
-                        for t in tmp:
-                            agg_alignment_targets[key] += t
+                    for key in res[0]:
+                        tmp = tuple(r[key] for r in res)
+                        agg_alignment_targets[key] = torch.zeros_like(tmp[0])
+                        if cfg['alignment_aggregate'] == "mean":
+                            for t in tmp:
+                                agg_alignment_targets[key] += t
+                            agg_alignment_targets[key] /= len(tmp)
+                        elif cfg['alignment_aggregate'] == "first":
+                            agg_alignment_targets[key] = tmp[0]
+                        elif cfg['alignment_aggregate'] == "all":
+                            agg_alignment_targets[key] = tmp
 
             res = pool.starmap(FedWorker.collab_round,
                                zip(workers,
