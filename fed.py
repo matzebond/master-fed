@@ -63,7 +63,7 @@ def build_parser():
                       help='number of round in the collaboration phase')
     base.add_argument('--stages', nargs='*',
                       default=['init_public', 'init_private', 'collab', 'upper', 'lower'],
-                      choices=['init_public', 'load_init_public', 'init_private', 'load_init_private', 'collab', 'upper', 'lower'],
+                      choices=['global_init_public', 'init_public', 'load_init_public', 'init_private', 'load_init_private', 'collab', 'upper', 'lower'],
                       help='list of phases that are executed (default: %(default)s)')
 
     # model
@@ -117,6 +117,9 @@ def build_parser():
     # training.add_argument('--init_public_lr', default=0.0001, type=float, metavar='LR', help='learning rate (used for every training optimizer)')
     training.add_argument('--init_public_epochs', default=0, type=int, metavar='EPOCHS',
                           help='number of training epochs on the public data in the initial public training stage')
+    training.add_argument('--global_init_public_epochs', default=None, type=int,
+                          metavar='EPOCHS',
+                          help='number of training epochs the global model should pretrain on the public data')
     training.add_argument('--init_public_batch_size', default=32, type=int,
                           metavar='BATCHSIZE',
                           help='size of the mini-batches in the initial public training')
@@ -733,6 +736,11 @@ def fed_main(cfg):
                               n_classes = cfg['num_private_classes'],
                               input_size = public_train_data[0][0].shape)
                 global_worker = FedGlobalWorker(cfg, model)
+
+            if "global_init_public" in cfg['stages']:
+                _, (acc, loss) = global_worker.init_public(cfg['global_init_public_epochs'])
+                wandb.run.summary["global_init_public/acc"] = acc
+                wandb.run.summary["global_init_public/loss"] = loss
 
             if "init_public" in cfg['stages']:
                 print("All parties starting with 'init_public'")
