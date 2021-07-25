@@ -123,6 +123,8 @@ class FedMD_CIFAR(nn.Module):
         self.output = nn.Linear(output_size, n_classes, bias = False)
 
     def change_classes(self, n_classes):
+        if n_classes == self.output.out_features:
+            return
         in_features = self.output.in_features
         self.output = nn.Linear(in_features, n_classes, bias = False)
 
@@ -192,6 +194,12 @@ class LPP(nn.Module):
 
         self.output = nn.Linear(output_size, n_classes, bias=False)
 
+    def change_classes(self, n_classes):
+        if n_classes == self.output.out_features:
+            return
+        in_features = self.output.in_features
+        self.output = nn.Linear(in_features, n_classes, bias = False)
+
     def forward(self, x, output='logits', from_rep=None):
         if from_rep is None:
             x = self.conv(x)
@@ -257,6 +265,12 @@ class LeNet_plus_plus(nn.Module):
             projection, True, output_size)
 
         self.output = nn.Linear(output_size, n_classes)
+
+    def change_classes(self, n_classes):
+        if n_classes == self.output.out_features:
+            return
+        in_features = self.output.in_features
+        self.output = nn.Linear(in_features, n_classes, bias = False)
 
     def forward(self, x, output='logits', from_rep=None):
         if from_rep is None:

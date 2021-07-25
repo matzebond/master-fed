@@ -68,7 +68,7 @@ def build_parser():
 
     # model
     model = parser.add_argument_group('model')
-    model.add_argument('--model_variant', default='FedMD_CIFAR', choices=['FedMD_CIFAR', 'LLP', 'LeNet++'],
+    model.add_argument('--model_variant', default='FedMD_CIFAR', choices=['FedMD_CIFAR', 'LLP', 'LeNet_plus_plus'],
                        help='')
     model.add_argument('--model_mapping', nargs='*', type=int,
                        help='')
