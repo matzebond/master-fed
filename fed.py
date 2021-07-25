@@ -135,7 +135,7 @@ def build_parser():
                          help='algorithm to use for the collaborative training, fixes some of the parameters in the \'variant\' group')
     variant.add_argument('--keep_prev_model', action='store_true',
                          help='parties keep the previous model (used for MOON contrastive loss)')
-    variant.add_argument('--global_model', choices=['averaging', 'distillation'],
+    variant.add_argument('--global_model', choices=['fix', 'averaging', 'distillation'],
                          help='build a global model by the specified method')
     variant.add_argument('--replace_local_model', action='store_true',
                          help='replace the local model of the parties by the global model')
@@ -209,7 +209,7 @@ def init_pool_process(priv_dls, priv_test_dl,
 
 
 # A hacky decorator that makes a (class) function return
-# self and the result of the function, so that the class works
+# self and the result of the function, so the class can update self
 # when called multiple times in a multiprocessing.Pool
 def self_dec(func):
     @functools.wraps(func)
@@ -606,6 +606,31 @@ class FedWorker:
         return loss.detach(), loss_target.detach(), (loss-loss_target).detach()
 
 
+class FedGlobalWorker(FedWorker):
+    def __init__(self, cfg, model):
+        self.cfg = cfg
+        self.cfg['rank'] = -1
+        self.model = model
+        self.gstep = 0
+        self.optim_state = None
+
+
+    def update_averaging(self, *models: nn.Module):
+        global_weights = copy.deepcopy(models[0].state_dict())
+        for model in models[1:]:
+            model_weights = model.state_dict()
+            for key in model_weights:
+                global_weights[key] += model_weights[key]
+
+        for key in global_weights:
+            global_weights[key] = global_weights[key] / len(models)
+
+        self.model.load_state_dict(global_weights)
+
+        combined_test_dl
+        public_test_dl
+
+
 def fed_main(cfg):
     # wandb.tensorboard.patch(root_logdir="wandb/latest-run/files")
     wandb.init(project='master-fed', entity='maschm',
@@ -672,7 +697,7 @@ def fed_main(cfg):
                dill.dumps(public_train_dl),
                dill.dumps(public_test_dl)]) as pool:
         workers = []
-        global_model = None
+        global_worker = None
         start_round = 0
         if not wandb.run.resumed:
             args = []
@@ -687,7 +712,7 @@ def fed_main(cfg):
                 model = model(*w_cfg['architecture'],
                               projection = cfg['projection_head'],
                               n_classes = cfg['num_private_classes'],
-                              input_size = (3, 32, 32))
+                              input_size = public_train_data[0][0].shape)
                 args.append((w_cfg, model))
             workers = pool.starmap(FedWorker, args)
             del args
@@ -697,7 +722,17 @@ def fed_main(cfg):
             macs, params = thop.profile(model, inputs=(test_input, ))
             print(*thop.clever_format([macs, params], "%.3f"))
             wandb.config.update({"model": {"macs": macs, "params": params}})
-            del model
+
+
+            if cfg['global_model']:
+                model = getattr(models, cfg['model_variant'])
+                cfg['global_architecture'] = model.hyper[0]
+
+                model = model(*cfg['global_architecture'],
+                              projection = cfg['projection_head'],
+                              n_classes = cfg['num_private_classes'],
+                              input_size = public_train_data[0][0].shape)
+                global_worker = FedGlobalWorker(cfg, model)
 
             if "init_public" in cfg['stages']:
                 print("All parties starting with 'init_public'")
@@ -749,14 +784,10 @@ def fed_main(cfg):
             else:
                 return
 
-            global_model = None
-            if cfg['global_model']:
-                global_model = copy.deepcopy(workers[0].model)
-
         if wandb.run.resumed:
             workers = torch.load(cfg['tmp'] / "workers.pt")
             if cfg['global_model']:
-                global_model = torch.load(cfg['tmp'] / "global.pt")
+                global_worker = torch.load(cfg['tmp'] / "global.pt")
             state = torch.load(cfg['tmp'] / "state.pt")
             start_round = state['round'] + 1
 
@@ -807,7 +838,8 @@ def fed_main(cfg):
                                    repeat(alignment_data),
                                    repeat(alignment_labels),
                                    repeat(agg_alignment_targets),
-                                   repeat(global_model if cfg['send_global'] else None)))
+                                   repeat(global_worker.model \
+                                          if cfg['send_global'] else None)))
             [workers, res] = list(zip(*res))
             metrics = defaultdict(float)
             for d in res:
@@ -819,24 +851,23 @@ def fed_main(cfg):
 
             # update global model
             if cfg['global_model'] == 'averaging':
-                global_weights = avg_params([w.model for w in workers])
-                global_model.load_state_dict(global_weights)
+                global_worker.update_averaging(*(w.model for w in workers))
                 print("model parameters averaged")
             elif cfg['global_model'] == 'distillation':
                 # TODO
                 pass
 
             # eval global model
-            if cfg['global_model']:
+            if cfg['global_model'] and cfg['global_model'] != 'fix':
                 evaluator = create_supervised_evaluator(
-                    global_model.to(device),
+                    global_worker.model.to(device),
                     {"acc": ignite.metrics.Accuracy(),
                      "loss": ignite.metrics.Loss(nn.CrossEntropyLoss())},
                     device)
                 evaluator.run(combined_test_dl)
                 metrics.update({"global/combined_test/acc": evaluator.state.metrics['acc'],
                                 "global/combined_test/loss": evaluator.state.metrics['loss']})
-                global_model = global_model.cpu()
+                global_worker.model.cpu()
             else:
                 metrics.update({"global/combined_test/acc": metrics['local/combined_test/acc'],
                                 "global/combined_test/loss": metrics['local/combined_test/loss']})
@@ -845,14 +876,14 @@ def fed_main(cfg):
             # TODO should this go to the start of the loop?
             if cfg['replace_local_model']:
                 for w in workers:
-                    w.model.load_state_dict(global_model.state_dict())
+                    w.model.load_state_dict(global_worker.model.state_dict())
                 print("local models replaced")
 
             if cfg['resumable']:
                 torch.save({'round': n}, cfg['tmp'] / "state.pt")
                 torch.save(workers, cfg['tmp'] / "workers.pt")
                 if cfg['global_model']:
-                    torch.save(global_model, cfg['tmp'] / "global.pt")
+                    torch.save(global_worker, cfg['tmp'] / "global.pt")
                 print("saved resuable state for round", n)
 
 
