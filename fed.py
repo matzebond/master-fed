@@ -156,9 +156,16 @@ def build_parser():
                          help='data to use for the alignment step')
     variant.add_argument('--alignment_target', choices=['logits', 'rep', 'both'],
                          help='target to use for the alignment step')
+    variant.add_argument('--alignment_label_loss', action='store_true',
+                         help='use crossentropy to calculate loss on alignment targets')
     variant.add_argument('--alignment_distillation_loss',
                          choices=['MSE', 'L1', 'SmoothL1', 'KL'],
                          help='loss to align the alignment target on the alignment data')
+    variant.add_argument('--alignment_distillation_target', choices=['logits', 'rep', 'both'],
+                         help='target to use for the distillation loss')
+    variant.add_argument('--alignment_distillation_weight', default=1, type=float,
+                         metavar='WEIGHT',
+                         help="weight for the alignment distillation loss")
     variant.add_argument('--alignment_contrastive_loss',
                          choices=['contrastive', 'constrastive+distillation'],
                          help='contrastive loss to align the alignment target on the alignment data')
@@ -455,17 +462,17 @@ class FedWorker:
             self.model.train()
             x = batch[0].to(device)
             with torch.no_grad():
-                logits, rep = self.model(x, output="both")
+                logits, rep = self.model(x, output='both')
                 if self.cfg['alignment_target'] == 'rep' \
                    or self.cfg['alignment_target'] == 'both':
                     if self.cfg['alignment_distillation_loss'] == 'KL':
-                        rep = F.softmax(rep)
+                        rep = F.softmax(rep, dim=-1)
                     engine.state.rep = torch.cat((engine.state.rep, rep.cpu()), dim=0)
                 if self.cfg['alignment_target'] == 'logits' \
                    or self.cfg['alignment_target'] == 'both':
                     logits = logits / self.cfg['alignment_temperature']
                     if self.cfg['alignment_distillation_loss'] == 'KL':
-                        logits = F.softmax(logits)
+                        logits = F.softmax(logits, dim=-1)
                     engine.state.logits = torch.cat((engine.state.logits, logits.cpu()), dim=0)
 
         alignment_ds = DataLoader(TensorDataset(alignment_data),
@@ -492,41 +499,47 @@ class FedWorker:
         self.model.train()
         self.optimizer.zero_grad()
         x, y, targets = util.prepare_batch(batch, device=device)
-        local_logits, local_rep = self.model(x, output="both")
-        loss = torch.tensor(0, device=device, dtype=torch.long)
+        local_logits, local_rep = self.model(x, output='both')
+        losses = []
 
         if self.cfg['alignment_contrastive_loss'] and \
-            self.cfg['alignment_contrastive_loss'].startswith('contrastive'):
+            self.cfg['alignment_contrastive_loss'] == 'contrastive':
             num = x.size(0)
             cos_dists = torch.tensor([], device=device)
             for i in range(num):
                 tmp = torch.tile(local_rep[i], (num, 1))
                 cos = F.cosine_similarity(tmp, targets['rep']).reshape(1, -1)
                 cos_dists = torch.cat((cos_dists, cos), dim=0)
+                # print(self.cfg['rank'], cos)
 
             cos_dists /= self.cfg['contrastive_loss_temperature']
 
             labels = torch.tensor(range(num), device=device, dtype=torch.long)
             loss_contrastive = F.cross_entropy(cos_dists, labels)
-            loss = loss + self.cfg['contrastive_loss_weight'] * loss_contrastive
+            losses.append(self.cfg['contrastive_loss_weight'] * loss_contrastive)
 
-        else:
-            if self.cfg['alignment_target'] == 'logits' \
-                or self.cfg['alignment_target'] == 'both':
+        if self.cfg['alignment_distillation_loss']:
+            if self.cfg['alignment_distillation_target'] == 'logits' \
+                or self.cfg['alignment_distillation_target'] == 'both':
                 local_logits = local_logits / self.cfg['alignment_temperature']
-                loss = loss + self.alignment_loss_fn(local_logits, targets['logits'])
-            if self.cfg['alignment_target'] == 'rep' \
-                or self.cfg['alignment_target'] == 'both':
+                distill_loss = self.alignment_loss_fn(local_logits, targets['logits'])
+                losses.append(self.cfg['alignment_distillation_weight'] * distill_loss)
+            if self.cfg['alignment_distillation_target'] == 'rep' \
+                or self.cfg['alignment_distillation_target'] == 'both':
                 local_rep = local_rep / self.cfg['alignment_temperature']
-                loss = loss + self.alignment_loss_fn(local_rep, targets['rep'])
+                distill_loss = self.alignment_loss_fn(local_logits, targets['rep'])
+                losses.append(self.cfg['alignment_distillation_weight'] * distill_loss)
 
-        if self.cfg['alignment_contrastive_loss'].endswith('+distillation'):
-            local_logits = local_logits / self.cfg['alignment_temperature']
-            loss = loss + self.alignment_loss_fn(local_logits, targets['logits'])
+        if self.cfg['alignment_label_loss']:
+            label_loss = F.cross_entropy(local_logits, y)
+            losses.append(label_loss)
 
+        loss = sum(losses)
         loss.backward()
+
         self.optimizer.step()
-        return loss
+        return loss.detach(), *(l.detach() for l in losses)
+
 
     @self_dec
     def collab_round(self, alignment_data=None, alignment_labels=None,
@@ -583,10 +596,10 @@ class FedWorker:
         self.optimizer.zero_grad()
         x, y = util.prepare_batch(batch, device=device)
         local_logits, local_rep = self.model(x, output='both')
-        loss = torch.tensor(0, device=device, dtype=torch.long)
+        losses = []
 
         loss_target = F.cross_entropy(local_logits, y)
-        loss += loss_target
+        losses.append(loss_target)
 
         if self.cfg['contrastive_loss'] == 'moon' and self.prev_model:
             global_rep = self.global_model(x, output='rep_only')
@@ -601,14 +614,15 @@ class FedWorker:
             # first "class" sim(global_rep) is the ground truth
             labels = torch.zeros(x.size(0), device=device).long()
             loss_moon = F.cross_entropy(logits, labels)
-            loss = loss + self.cfg['contrastive_loss_weight'] * loss_moon
+            losses.append(self.cfg['contrastive_loss_weight'] * loss_moon)
 
         if self.cfg['contrastive_loss'] == 'lpp':
             pass
 
+        loss = sum(losses)
         loss.backward()
         self.optimizer.step()
-        return loss.detach(), loss_target.detach(), (loss-loss_target).detach()
+        return loss.detach(), *(l.detach() for l in losses)
 
 
 class FedGlobalWorker(FedWorker):
@@ -963,6 +977,7 @@ if __name__ == '__main__':
         cfg['send_global'] = False
         cfg['alignment_data'] = 'public'
         cfg['alignment_target'] = 'logits'
+        cfg['alignment_distillation_target'] = 'logits'
     elif cfg['variant'] == 'fedavg':
         cfg['global_model'] = 'averaging'
         cfg['replace_local_model'] = True
@@ -985,6 +1000,9 @@ if __name__ == '__main__':
         cfg['alignment_target'] = 'both'
 
     print(cfg)
+
+    if cfg['alignment_target'] != 'both' or (cfg['alignment_distillation_target'] and cfg['alignment_target'] != cfg['alignment_distillation_target']):
+        raise Exception('alignment_target and alignment_distillation_target are incompatible')
 
     if cfg['seed'] is None:
         cfg['seed'] = np.random.randint(0, 0xffff_ffff)
