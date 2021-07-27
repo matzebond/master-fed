@@ -544,15 +544,17 @@ class FedWorker:
                                     algorithm='ball_tree')
                                     # metric="pyfunc",
                                     # metric_params={"func": norm2})
-            nbrs = nbrs.fit(targets['rep'])
-            alpha = nbrs.kneighbors_graph(targets['rep'], mode='distance')
+            targs = targets['rep'].cpu()
+            nbrs = nbrs.fit(targs)
+            alpha = nbrs.kneighbors_graph(targs, mode='distance')
             # g = g.eliminate_zeros()
             alpha.data = np.exp(-alpha.data)
+            alphaT = torch.tensor(alpha.toarray(), device=device)
 
             # dists = scidist.squareform(scidist.cdist(local_rep, norm2))
 
             dists = torch.cdist(local_rep, local_rep)
-            loss_locality = torch.sum(torch.mul(dists, torch.tensor(alpha.toarray())))
+            loss_locality = torch.sum(torch.mul(dists, alphaT))
             losses.append(self.cfg['contrastive_loss_weight'] * loss_locality)
 
         if self.cfg['alignment_distillation_loss']:
