@@ -27,6 +27,7 @@ import ignite.metrics
 from ignite.engine import (Engine, Events,
                            create_supervised_trainer,
                            create_supervised_evaluator)
+from sklearn.neighbors import NearestNeighbors
 import thop
 import ast
 
@@ -167,7 +168,7 @@ def build_parser():
                          metavar='WEIGHT',
                          help="weight for the alignment distillation loss")
     variant.add_argument('--alignment_contrastive_loss',
-                         choices=['contrastive', 'constrastive+distillation'],
+                         choices=['contrastive', 'locality_preserving'],
                          help='contrastive loss to align the alignment target on the alignment data')
     variant.add_argument('--alignment_size', type=alignment_size_type, metavar='SIZE',
                          help='amount of instances to pick from the data for the alignment')
@@ -510,7 +511,7 @@ class FedWorker:
         losses = []
 
         if self.cfg['alignment_contrastive_loss'] and \
-            self.cfg['alignment_contrastive_loss'] == 'contrastive':
+           self.cfg['alignment_contrastive_loss'] == 'contrastive':
             num = x.size(0)
             cos_dists = torch.tensor([], device=device)
             for i in range(num):
@@ -524,6 +525,25 @@ class FedWorker:
             labels = torch.tensor(range(num), device=device, dtype=torch.long)
             loss_contrastive = F.cross_entropy(cos_dists, labels)
             losses.append(self.cfg['contrastive_loss_weight'] * loss_contrastive)
+
+        if self.cfg['alignment_contrastive_loss'] and \
+           self.cfg['alignment_contrastive_loss'] == 'locality_preserving':
+            # norm2 = lambda u, v: ((u-v)**2).sum()
+            # k = self.cfg['locality_preserving_k'] + 1
+            nbrs = NearestNeighbors(n_neighbors=self.cfg['locality_preserving_k'] + 1,
+                                    algorithm='ball_tree')
+                                    # metric="pyfunc",
+                                    # metric_params={"func": norm2})
+            nbrs = nbrs.fit(targets['rep'])
+            alpha = nbrs.kneighbors_graph(targets['rep'], mode='distance')
+            # g = g.eliminate_zeros()
+            alpha.data = np.exp(-alpha.data)
+
+            # dists = scidist.squareform(scidist.cdist(local_rep, norm2))
+
+            dists = torch.cdist(local_rep, local_rep)
+            loss_locality = torch.sum(torch.mul(dists, torch.tensor(alpha.toarray())))
+            losses.append(self.cfg['contrastive_loss_weight'] * loss_locality)
 
         if self.cfg['alignment_distillation_loss']:
             if self.cfg['alignment_distillation_target'] == 'logits' \
@@ -625,9 +645,6 @@ class FedWorker:
             labels = torch.zeros(x.size(0), device=device).long()
             loss_moon = F.cross_entropy(logits, labels)
             losses.append(self.cfg['contrastive_loss_weight'] * loss_moon)
-
-        if self.cfg['contrastive_loss'] == 'lpp':
-            pass
 
         loss = sum(losses)
         loss.backward()

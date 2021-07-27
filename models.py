@@ -150,7 +150,7 @@ class FedMD_CIFAR(nn.Module):
 
 # from the paper Learning Student Networks via Feature Embedding - 2021
 class LPP(nn.Module):
-    hyper = [[([96], 4), ([96], 4), ([96], 4)], # Teacher
+    hyper = [[([96], 2), ([96], 4), ([96], 4)], # Teacher
              [([16, 16, 16], 2), ([32, 32, 32], 2), ([48, 48, 64], 8)], # Student 1
              [([16, 32, 32], 2), ([48, 64, 80], 2), ([96, 96, 128], 8)], # Student 2
              [([32, 48, 64, 64], 2), ([80, 80, 80, 80], 2), ([128, 128, 128], 8)], # Student 3
@@ -186,7 +186,7 @@ class LPP(nn.Module):
             h = calc_size(output_size[2], pool, pool, 0)
             output_size = (output_size[0], w, h)
             conv_block.append(nn.Sequential(*layers))
-            print(output_size)
+            # print(output_size)
         self.conv = nn.Sequential(*conv_block)
 
         self.projection, output_size = build_projection_block(
