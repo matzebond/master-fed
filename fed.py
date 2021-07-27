@@ -346,8 +346,15 @@ class FedWorker:
         return res
 
 
-    def coarse_eval(self, dls):
+    def coarse_eval(self, dls, last_trainer=None):
         self.gstep = max(0, self.gstep-1)
+
+        if last_trainer and last_trainer.state.eval_res:
+            for name, res in last_trainer.state.eval_res.items():
+                self.writer.add_scalar(name, res, self.gstep)
+            self.gstep += 1
+            return last_trainer.state.eval_res
+
         return self.evaluate(None, "coarse", dls, add_stage=True)
 
 
@@ -580,7 +587,10 @@ class FedWorker:
                                             "private_training", self.private_dls):
             collab_tr.run(self.private_dl, self.cfg['private_training_epochs'])
         
-        res = self.coarse_eval(self.private_dls)
+        if self.cfg['private_training_epochs'] > 0:
+            res = self.coarse_eval(self.private_dls, collab_tr)
+        else:
+            res = self.coarse_eval(self.private_dls, alignment_tr)
 
         self.teardown(save_optimizer=True)
         if self.cfg['keep_prev_model']:
