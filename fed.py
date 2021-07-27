@@ -50,6 +50,9 @@ def build_parser():
             return "full"
         return int(string)
 
+    def slice_parser(string):
+        return slice(*map(int, string.split(':')))
+
     parser = argparse.ArgumentParser(
         usage='%(prog)s [path/default_config_file.py] [options]'
     )
@@ -108,7 +111,11 @@ def build_parser():
 
     # training
     training = parser.add_argument_group('training')
-    training.add_argument('--private_training_epochs', default=5, type=int, metavar='EPOCHS',
+    training.add_argument('--collab_participation', nargs='+',
+                          default=[slice(0, None)], type=slice_parser,
+                          help="")
+    training.add_argument('--private_training_epochs', nargs='+', default=5, type=int,
+                          metavar='EPOCHS',
                           help='number of training epochs on the private data per collaborative round')
     # training.add_argument('--private_training_batch_size', default=5) # TODO not supported
     training.add_argument('--optim', default='Adam', choices=['Adam', 'SGD'])
@@ -116,9 +123,12 @@ def build_parser():
                           help='learning rate for any training optimizer')
     training.add_argument('--optim_weight_decay', default=0, type=float, metavar='WD',
                           help='weight decay rate for any training optimizer')
+    # training.add_argument('--optim_public_lr', default=0.0001, type=float,
+    #                       metavar='LR',
+    #                       help='public training learning rate')
 
-    # training.add_argument('--init_public_lr', default=0.0001, type=float, metavar='LR', help='learning rate (used for every training optimizer)')
-    training.add_argument('--init_public_epochs', default=0, type=int, metavar='EPOCHS',
+    training.add_argument('--init_public_epochs', default=0, nargs='+', type=int,
+                          metavar='EPOCHS',
                           help='number of training epochs on the public data in the initial public training stage')
     training.add_argument('--global_init_public_epochs', default=None, type=int,
                           metavar='EPOCHS',
@@ -126,7 +136,7 @@ def build_parser():
     training.add_argument('--init_public_batch_size', default=32, type=int,
                           metavar='BATCHSIZE',
                           help='size of the mini-batches in the initial public training')
-    training.add_argument('--init_private_epochs', default=0, type=int,
+    training.add_argument('--init_private_epochs', default=0, nargs='+', type=int,
                           metavar='EPOCHS',
                           help='number of training epochs on the private data in the initial private training stage')
     training.add_argument('--init_private_batch_size', default=32, type=int,
@@ -1010,6 +1020,17 @@ if __name__ == '__main__':
     parser.set_defaults(**cfg)
     args = parser.parse_args()
     cfg = vars(args)
+
+    # fill parameters for all parties
+    global individual_cfgs
+    individual_cfgs = ['init_public_epochs', 'init_private_epochs', 'collab_participation', 'private_training_epochs']
+    for c in individual_cfgs:
+        if isinstance(cfg[c], int):
+            cfg[c] = [cfg[c]] * cfg['parties']
+        elif len(cfg[c]) < cfg['parties']:
+            missing = cfg['parties'] - len(cfg[c])
+            cfg[c] += [cfg[c][-1]] * missing
+
 
     if cfg['variant'] == 'fedmd':
         cfg['global_model'] = None
