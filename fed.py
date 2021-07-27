@@ -63,7 +63,7 @@ def build_parser():
                       help='number of round in the collaboration phase')
     base.add_argument('--stages', nargs='*',
                       default=['init_public', 'init_private', 'collab', 'upper', 'lower'],
-                      choices=['global_init_public', 'init_public', 'load_init_public', 'init_private', 'load_init_private', 'collab', 'upper', 'lower'],
+                      choices=['global_init_public', 'save_global_init_public', 'load_global_init_public', 'init_public', 'save_init_public', 'load_init_public', 'init_private', 'save_init_private', 'load_init_private', 'collab', 'upper', 'lower'],
                       help='list of phases that are executed (default: %(default)s)')
 
     # model
@@ -362,7 +362,7 @@ class FedWorker:
                                             "init_public",
                                             self.public_dls,
                                             add_stage=True):
-            if not epochs:
+            if epochs is None:
                 epochs = self.cfg['init_public_epochs']
             self.trainer.run(public_train_dl, epochs)
 
@@ -386,7 +386,7 @@ class FedWorker:
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "init_private", self.private_dls):
-            if not epochs:
+            if epochs is None:
                 epochs = self.cfg['init_private_epochs']
             self.trainer.run(self.private_dl, epochs)
 
@@ -410,7 +410,7 @@ class FedWorker:
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "upper", self.private_dls, add_stage=True):
-            if not epochs:
+            if epochs is None:
                 if 'upper_bound_epochs' in self.cfg:
                     epochs = self.cfg['upper_bound_epochs']
                 else:
@@ -431,7 +431,7 @@ class FedWorker:
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "lower", self.private_dls, add_stage=True):
-            if not epochs:
+            if epochs is None:
                 if 'lower_bound_epochs' in self.cfg:
                     epochs = self.cfg['lower_bound_epochs']
                 else:
@@ -714,6 +714,9 @@ def fed_main(cfg):
     class_names = [private_train_data.classes[x] for x in cfg['classes']]
     print("public classes:", public_train_data.classes)
     print("private classes: ", class_names)
+    print("private_dls length:", *(len(d.dataset) for d in private_dls))
+    print("combined_dl length:", len(combined_dl.dataset))
+    print("public_dl length:", len(public_train_dl.dataset))
 
 
     # to mitigate divergence due to loading the indices
@@ -737,6 +740,8 @@ def fed_main(cfg):
                 w_cfg['path'] = cfg['path'] / str(i)
                 w_cfg['tmp'] = cfg['tmp'] / str(i)
                 w_cfg['model'] = cfg['model_mapping'][i]
+                for c in individual_cfgs:
+                    w_cfg[c] = cfg[c][i]
                 model = getattr(models, cfg['model_variant'])
                 w_cfg['architecture'] = model.hyper[w_cfg['model']]
                 model = model(*w_cfg['architecture'],
@@ -750,7 +755,7 @@ def fed_main(cfg):
             model = copy.deepcopy(workers[0].model)
             test_input = public_train_data[0][0].unsqueeze(0)
             macs, params = thop.profile(model, inputs=(test_input, ))
-            print(*thop.clever_format([macs, params], "%.3f"))
+            print("worker macs&params: ", *thop.clever_format([macs, params], "%.3f"))
             wandb.config.update({"model": {"macs": macs, "params": params}})
 
 
@@ -763,11 +768,20 @@ def fed_main(cfg):
                               n_classes = cfg['num_private_classes'],
                               input_size = public_train_data[0][0].shape)
                 global_worker = FedGlobalWorker(cfg, model)
+                macs, params = thop.profile(model, inputs=(test_input, ), verbose=False)
+                print("global macs&params: ", *thop.clever_format([macs, params], "%.3f"))
 
             if "global_init_public" in cfg['stages']:
                 _, (acc, loss) = global_worker.init_public(cfg['global_init_public_epochs'])
                 wandb.run.summary["global_init_public/acc"] = acc
                 wandb.run.summary["global_init_public/loss"] = loss
+                if "save_global_init_public" in cfg['stages']:
+                    util.save_models_to_artifact(cfg, [global_worker],
+                                                 "global_init_public",
+                                                 {"acc": acc, "loss": loss})
+            elif "load_global_init_public" in cfg['stages']:
+                global_worker.model.change_classes(cfg['num_public_classes'])
+                util.load_models_from_artifact(cfg, [global_worker], "init_public")
 
             if "init_public" in cfg['stages']:
                 print("All parties starting with 'init_public'")
