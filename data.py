@@ -62,20 +62,7 @@ def get_pub_priv(private, public=None, root="data", normalize=True, augment=True
     transform_train = transforms.Compose(list(transform_train.values()))
     transform_test = transforms.Compose(list(transform_test.values()))
 
-    public = getattr(datasets, public)
     private = getattr(datasets, private)
-    pub_train = public(
-        root=root,
-        train=True,
-        download=True,
-        transform=transform_train
-    )
-    pub_test = public(
-        root=root,
-        train=False,
-        download=False,
-        transform=transform_test
-    )
     priv_train = private(
         root=root,
         train=True,
@@ -83,6 +70,21 @@ def get_pub_priv(private, public=None, root="data", normalize=True, augment=True
         transform=transform_train
     )
     priv_test = private(
+        root=root,
+        train=False,
+        download=False,
+        transform=transform_test
+    )
+    if not public or public == "same":
+        return priv_train, priv_test, priv_train, priv_test
+    public = getattr(datasets, public)
+    pub_train = public(
+        root=root,
+        train=True,
+        download=True,
+        transform=transform_train
+    )
+    pub_test = public(
         root=root,
         train=False,
         download=False,

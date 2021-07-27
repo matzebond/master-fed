@@ -669,11 +669,11 @@ def fed_main(cfg):
     # wandb.tensorboard.patch(root_logdir=cfg['path'])
 
     public_train_data, public_test_data, private_train_data, private_test_data = \
-        get_pub_priv(
-            cfg['dataset'],
-            public=cfg['public_dataset'] if cfg['public_dataset'] != 'same' else None,
-            root=cfg['datafolder'],
-            augment=cfg['augmentation'], normalize=cfg['normalization'])
+        get_pub_priv(cfg['dataset'],
+                     public=cfg['public_dataset'],
+                     root=cfg['datafolder'],
+                     augment=cfg['augmentation'],
+                     normalize=cfg['normalization'])
 
     if cfg['classes'] is None or len(cfg['classes']) == 0:
         cfg['classes'] = list(range(len(private_train_data.classes)))
@@ -1015,7 +1015,7 @@ if __name__ == '__main__':
 
     print(cfg)
 
-    if cfg['alignment_target'] != 'both' or (cfg['alignment_distillation_target'] and cfg['alignment_target'] != cfg['alignment_distillation_target']):
+    if cfg['alignment_target'] != 'both' and (cfg['alignment_distillation_target'] and cfg['alignment_target'] != cfg['alignment_distillation_target']):
         raise Exception('alignment_target and alignment_distillation_target are incompatible')
 
     if cfg['seed'] is None:
