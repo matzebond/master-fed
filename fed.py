@@ -749,6 +749,10 @@ def fed_main(cfg):
         public_test_dl = DataLoader(public_test_data,
                                     batch_size=cfg['init_public_batch_size'])
 
+    input_shape = private_train_data[0][0].shape
+    if len(input_shape) < 3:
+        input_shape = (1, *input_shape)
+
     print(f"train {cfg['parties']} models on")
     class_names = [private_train_data.classes[x] for x in cfg['classes']]
     print("public classes:", public_train_data.classes)
@@ -786,13 +790,13 @@ def fed_main(cfg):
                 model = model(*w_cfg['architecture'],
                               projection = cfg['projection_head'],
                               n_classes = cfg['num_private_classes'],
-                              input_size = public_train_data[0][0].shape)
+                              input_size = input_shape)
                 args.append((w_cfg, model))
             workers = pool.starmap(FedWorker, args)
             del args
 
             model = copy.deepcopy(workers[0].model)
-            test_input = public_train_data[0][0].unsqueeze(0)
+            test_input = public_train_data[0][0].reshape((1,*input_shape))
             macs, params = thop.profile(model, inputs=(test_input, ))
             print("worker macs&params: ", *thop.clever_format([macs, params], "%.3f"))
             wandb.config.update({"model": {"macs": macs, "params": params}})

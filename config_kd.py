@@ -10,7 +10,7 @@ cfg = {
     'projection_head': 500,
 
     'dataset': 'CIFAR10',
-    'public_dataset': 'CIFAR10',
+    'public_dataset': 'same',
     'classes': None,
     'samples': None,
     'concentration': 'iid',
