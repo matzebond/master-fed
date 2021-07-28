@@ -150,10 +150,10 @@ class FedMD_CIFAR(nn.Module):
 
 # from the paper Learning Student Networks via Feature Embedding - 2021
 class LPP(nn.Module):
-    hyper = [[([96], 2), ([96], 4), ([96], 4)], # Teacher
-             [([16, 16, 16], 2), ([32, 32, 32], 2), ([48, 48, 64], 8)], # Student 1
-             [([16, 32, 32], 2), ([48, 64, 80], 2), ([96, 96, 128], 8)], # Student 2
-             [([32, 48, 64, 64], 2), ([80, 80, 80, 80], 2), ([128, 128, 128], 8)], # Student 3
+    hyper = [[([96], (4, 2)), ([96], (4, 1)), ([96], (4, 1))], # Teacher
+             [([16, 16, 16], 2), ([32, 32, 32], 2), ([48, 48, 64], (8, 8))], # Student 1
+             [([16, 32, 32], 2), ([48, 64, 80], 2), ([96, 96, 128], (8, 8))], # Student 2
+             [([32, 48, 64, 64], 2), ([80, 80, 80, 80], 2), ([128, 128, 128], (8, 8))], # Student 3
              [([32, 32, 32, 48, 48], 2), ([80, 80, 80, 80, 80, 80], 2), ([128, 128, 128, 128, 128, 128], 8)], # Student 4
              ]
 
@@ -168,7 +168,7 @@ class LPP(nn.Module):
         output_size = input_size
 
         conv_block = []
-        for group in conv_def:
+        for i, group in enumerate(conv_def):
             layers = []
             for feat in group[0]:
                 layers.append(nn.Conv2d(output_size[0], feat,
@@ -180,10 +180,16 @@ class LPP(nn.Module):
             layers.append(nn.BatchNorm2d(output_size[0]))
             layers.append(nn.ReLU())
             layers.append(nn.Dropout(dropout))
-            pool = group[1]
-            layers.append(nn.MaxPool2d(kernel_size=pool, stride=pool))
-            w = calc_size(output_size[1], pool, pool, 0)
-            h = calc_size(output_size[2], pool, pool, 0)
+            if isinstance(group[1], tuple):
+                pool = group[1][0]
+                stride = group[1][1]
+            else:
+                pool = group[1]
+                stride = pool
+            pad = (pool-stride)//2
+            layers.append(nn.MaxPool2d(kernel_size=pool, stride=stride, padding=pad))
+            w = calc_size(output_size[1], pool, stride, pad)
+            h = calc_size(output_size[2], pool, stride, pad)
             output_size = (output_size[0], w, h)
             conv_block.append(nn.Sequential(*layers))
             # print(output_size)

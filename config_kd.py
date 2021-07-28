@@ -7,7 +7,7 @@ cfg = {
     'stages': ['global_init_public', 'init_public', 'init_private', 'collab'],
 
     'model_variant': 'LPP', #'LeNet_plus_plus',
-    'projection_head': None,
+    'projection_head': 500,
 
     'dataset': 'CIFAR10',
     'public_dataset': 'CIFAR10',
@@ -25,7 +25,7 @@ cfg = {
     'send_global': False,
 
 
-    'global_init_public_epochs': 1,
+    'global_init_public_epochs': 100,
 
     'alignment_data': 'public',
     'alignment_size': 'full',
@@ -42,7 +42,7 @@ cfg = {
     'alignment_label_loss': True,
     'alignment_label_loss': True,
     'label_loss_weight': True,
-    'alignment_matching_epochs': 1,
+    'alignment_matching_epochs': 100,
 
 
     'private_training_epochs': 0,
