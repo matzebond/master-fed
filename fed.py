@@ -1079,8 +1079,9 @@ if __name__ == '__main__':
     # logger = mp.log_to_stderr()
     # logger.setLevel(multiprocessing.SUBDEBUG)
     if cfg['pool_size'] == 1:
-        import multiprocessing.dummy as mp
-        print("Using dummy for multiprocessing")
+        # import multiprocessing.dummy as mp
+        # print("Using dummy for multiprocessing")
+        mp.set_start_method('spawn')  #, force=True)
     else:
         mp.set_start_method('spawn')  #, force=True)
     fed_main(cfg)
