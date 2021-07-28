@@ -223,7 +223,7 @@ def init_pool_process(priv_dls, priv_test_dl,
     global device
     if torch.cuda.is_available():
         worker = mp.current_process()
-        worker_id = worker._identity[0] - 1 if worker._identity else 0
+        worker_id = worker._identity[0] - 1 if hasattr(worker,'_identity') else 0
         gpu_id = worker_id % gpus
         device = torch.device('cuda', gpu_id)
     else:
