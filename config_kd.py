@@ -3,7 +3,7 @@ from itertools import islice, cycle, repeat
 
 cfg = {
     'parties': 1,
-    'collab_rounds': 1,
+    'collab_rounds': 100,
     'stages': ['global_init_public', 'init_public', 'init_private', 'collab'],
 
     'model_variant': 'LPP', #'LeNet_plus_plus',
@@ -42,7 +42,7 @@ cfg = {
     'alignment_label_loss': True,
     'alignment_label_loss': True,
     'label_loss_weight': True,
-    'alignment_matching_epochs': 100,
+    'alignment_matching_epochs': 1,
 
 
     'private_training_epochs': 0,
