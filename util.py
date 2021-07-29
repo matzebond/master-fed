@@ -160,10 +160,10 @@ def reduce_tb_events(indirs_glob,
                      reduce_ops: List[str] = ["mean", "min", "max"]):
     events_dict = load_tb_events(indirs_glob)
     reduced_events = reduce_events(events_dict, reduce_ops)
-    write_tb_events(reduced_events, outdir, overwrite)
+    write_tb_events(reduced_events, str(outdir), overwrite)
 
 def reduce_tb_events_from_globs(input_globs,
-                                outdir: str,
+                                outdir: Union[str, Path],
                                 overwrite: bool = False,
                                 reduce_ops: List[str] = ["mean", "min", "max"]):
     events_dict = {}
@@ -171,8 +171,11 @@ def reduce_tb_events_from_globs(input_globs,
         run = defaultdict(list)
         event_files = sorted(list(glob))
         for efile in event_files:
-            for key, data in load_tb_events(str(efile)).items():
-                run[key] = np.append(run[key], data)
+            try:
+                for key, data in load_tb_events(str(efile), strict_steps=False).items():
+                    run[key] = np.append(run[key], data)
+            except Exception:
+                pass
 
         for key, data in run.items():
             data = data.reshape(-1,1)
@@ -182,7 +185,7 @@ def reduce_tb_events_from_globs(input_globs,
                 events_dict[key] = np.hstack((events_dict[key], data))
 
     reduced_events = reduce_events(events_dict, reduce_ops)
-    write_tb_events(reduced_events, outdir, overwrite)
+    write_tb_events(reduced_events, str(outdir), overwrite)
     # return reduced_events
 
 def prepare_batch(

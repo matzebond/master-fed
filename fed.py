@@ -1015,7 +1015,8 @@ def fed_main(cfg):
 
 
     globs = (w.cfg['path'].glob("events.out.tfevents*") for w in workers)
-    util.reduce_tb_events_from_globs(globs,str(cfg['path'] / "all"),
+    util.reduce_tb_events_from_globs(globs,
+                                     cfg['path'] / "all",
                                      reduce_ops = ["mean", "min", "max"])
 
     wandb.finish()
