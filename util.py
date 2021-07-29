@@ -104,14 +104,16 @@ def dataset_split(dataset):
 
 
 
-def save_models_to_artifact(cfg, workers, stage, metadata):
+def save_models_to_artifact(cfg, workers, stage, metadata, filename=None):
+    if filename is None:
+        filename = stage
     model_artifact = wandb.Artifact(stage, type='model',
                                     metadata=metadata)
 
     for rank, worker in enumerate(workers):
-        model_artifact.add_file(f"{worker.cfg['tmp']}/{stage}.pth",
+        model_artifact.add_file(f"{worker.cfg['tmp']}/{filename}.pth",
                                 f"r{rank}-m{cfg['model_mapping'][rank]}-{stage}.pth")
-        model_artifact.add_file(f"{worker.cfg['tmp']}/{stage}_optim.pth",
+        model_artifact.add_file(f"{worker.cfg['tmp']}/{filename}_optim.pth",
                                 f"r{rank}-m{cfg['model_mapping'][rank]}-{stage}_optim.pth")
 
     wandb.log_artifact(model_artifact)
@@ -136,7 +138,7 @@ def load_models_from_artifact(cfg, workers, stage, version="latest"):
 
     wandb.run.summary[f"{stage}/acc"] = model_artifact.metadata['acc']
     wandb.run.summary[f"{stage}/loss"] = model_artifact.metadata['loss']
-    return model_artifact, metadata
+    return model_artifact, model_artifact.metadata
 
 
 

@@ -259,10 +259,7 @@ def generate_total_indices(targets, classes_in_use = range(10)) -> np.ndarray:
 
 
 def get_idx_artifact_name(cfg):
-    if cfg['partition_normalize'] == 'party':
-        name = f"p{cfg['parties']}_s{cfg['samples']}_c{cfg['concentration']}_C{'-'.join(map(str,cfg['classes']))}"
-    else:
-        name = f"p{cfg['parties']}_n{cfg['partition_normalize']}_s{cfg['samples']}_c{cfg['concentration']}_C{'-'.join(map(str,cfg['classes']))}"
+    name = f"{cfg['dataset']}_p{cfg['parties']}_n{cfg['partition_normalize']}_s{cfg['samples']}_c{cfg['concentration']}_C{'-'.join(map(str,cfg['classes']))}"
 
     if cfg['seed'] != 0:
         name += '_' + str(cfg['seed'])

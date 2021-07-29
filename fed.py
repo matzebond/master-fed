@@ -666,12 +666,8 @@ class FedWorker:
 
 class FedGlobalWorker(FedWorker):
     def __init__(self, cfg, model):
-        self.cfg = cfg
-        self.cfg['rank'] = -1
-        self.model = model
-        self.gstep = 0
-        self.optim_state = None
-
+        cfg['rank'] = -1
+        super(FedGlobalWorker, self).__init__(cfg, model)
 
     def update_averaging(self, *models: nn.Module):
         global_weights = copy.deepcopy(models[0].state_dict())
@@ -780,8 +776,8 @@ def fed_main(cfg):
             for i in range(cfg['parties']):
                 w_cfg = cfg.copy()
                 w_cfg['rank'] = i
-                w_cfg['path'] = cfg['path'] / str(i)
-                w_cfg['tmp'] = cfg['tmp'] / str(i)
+                w_cfg['path'] = cfg['path'] / str(w_cfg['rank'])
+                w_cfg['tmp'] = cfg['tmp'] / str(w_cfg['rank'])
                 w_cfg['model'] = cfg['model_mapping'][i]
                 for c in individual_cfgs:
                     w_cfg[c] = cfg[c][i]
@@ -803,14 +799,19 @@ def fed_main(cfg):
 
 
             if cfg['global_model']:
+                w_cfg = cfg.copy()
+                w_cfg['rank'] = -1
+                w_cfg['path'] = cfg['path'] / str(w_cfg['rank'])
+                w_cfg['tmp'] = cfg['tmp'] / str(w_cfg['rank'])
                 model = getattr(models, cfg['model_variant'])
-                cfg['global_architecture'] = model.hyper[0]
+                w_cfg['global_architecture'] = model.hyper[0]
+                # w_cfg['global_architecture'] = model.hyper[cfg['global_model_mapping']]
 
-                model = model(*cfg['global_architecture'],
+                model = model(*w_cfg['global_architecture'],
                               projection = cfg['projection_head'],
                               n_classes = cfg['num_private_classes'],
                               input_size = public_train_data[0][0].shape)
-                global_worker = FedGlobalWorker(cfg, model)
+                global_worker = FedGlobalWorker(w_cfg, model)
                 macs, params = thop.profile(model, inputs=(test_input, ), verbose=False)
                 print("global macs&params: ", *thop.clever_format([macs, params], "%.3f"))
 
@@ -821,10 +822,11 @@ def fed_main(cfg):
                 if "save_global_init_public" in cfg['stages']:
                     util.save_models_to_artifact(cfg, [global_worker],
                                                  "global_init_public",
-                                                 {"acc": acc, "loss": loss})
+                                                 {"acc": acc, "loss": loss},
+                                                 filename="init_public")
             elif "load_global_init_public" in cfg['stages']:
                 global_worker.model.change_classes(cfg['num_public_classes'])
-                util.load_models_from_artifact(cfg, [global_worker], "init_public")
+                util.load_models_from_artifact(cfg, [global_worker], "global_init_public")
 
             if "init_public" in cfg['stages']:
                 print("All parties starting with 'init_public'")
