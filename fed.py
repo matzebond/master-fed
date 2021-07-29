@@ -20,7 +20,6 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Subset, TensorDataset
 from torch.utils.tensorboard import SummaryWriter
 import torch.multiprocessing as mp
-from torch.multiprocessing import Pool
 # from multiprocessing.pool import Pool
 import ignite
 import ignite.metrics
@@ -761,13 +760,13 @@ def fed_main(cfg):
     # to mitigate divergence due to loading the indices
     set_seed(cfg['seed'])
 
-    with Pool(cfg['pool_size'], init_pool_process,
-              [dill.dumps(private_dls),
-               dill.dumps(private_test_dls),
-               dill.dumps(combined_dl),
-               dill.dumps(combined_test_dl),
-               dill.dumps(public_train_dl),
-               dill.dumps(public_test_dl)]) as pool:
+    with mp.Pool(cfg['pool_size'], init_pool_process,
+                 [dill.dumps(private_dls),
+                  dill.dumps(private_test_dls),
+                  dill.dumps(combined_dl),
+                  dill.dumps(combined_test_dl),
+                  dill.dumps(public_train_dl),
+                  dill.dumps(public_test_dl)]) as pool:
         workers = []
         global_worker = None
         start_round = 0
@@ -1092,9 +1091,9 @@ if __name__ == '__main__':
     # logger = mp.log_to_stderr()
     # logger.setLevel(multiprocessing.SUBDEBUG)
     if cfg['pool_size'] == 1:
-        # import multiprocessing.dummy as mp
-        # print("Using dummy for multiprocessing")
-        mp.set_start_method('spawn')  #, force=True)
+        import multiprocessing.dummy as mp
+        print("Using dummy for multiprocessing")
+        # mp.set_start_method('spawn')  #, force=True)
     else:
         mp.set_start_method('spawn')  #, force=True)
     fed_main(cfg)
