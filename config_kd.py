@@ -4,7 +4,7 @@ from itertools import islice, cycle, repeat
 cfg = {
     'parties': 1,
     'collab_rounds': 100,
-    'stages': ['global_init_public', 'init_public', 'init_private', 'collab'],
+    'stages': ['global_init_public', 'init_public', 'init_private', 'collab', 'lower'],
 
     'model_variant': 'LPP', #'LeNet_plus_plus',
     'projection_head': 500,
@@ -52,7 +52,7 @@ cfg = {
     # 'optim_lr': 0.001,
     # 'optim_weight_decay': 0.9,
 
-    'upper_bound_epochs': 100,
+    # 'upper_bound_epochs': 100,
     'lower_bound_epochs': 100,
 
     'pool_size': 1,
