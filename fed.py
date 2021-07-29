@@ -890,7 +890,13 @@ def fed_main(cfg):
             alignment_data, alignment_labels, agg_alignment_targets = None, None, {}
             if cfg['alignment_data']:
                 if cfg['alignment_data'] == "public":
-                    if cfg['alignment_size'] == "full":
+                    if cfg['alignment_size'] == "full" and not cfg['samples'] is None:
+                        print(f"Alignment Data: all {len(public_train_dl.dataset)} examples from the public dataset")
+                        alignment_dl = DataLoader(
+                            public_train_dl.dataset,
+                            batch_size=len(public_train_dl.dataset))
+                        alignment_data, alignment_labels = next(iter(alignment_dl))
+                    elif cfg['alignment_size'] == "full":
                         print(f"Alignment Data: all {len(public_train_data)} examples from the public dataset")
                         alignment_data, alignment_labels = list(zip(*public_train_data))
                         alignment_data = torch.stack(alignment_data)
