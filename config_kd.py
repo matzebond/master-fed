@@ -40,8 +40,7 @@ cfg = {
     'alignment_distillation_loss': 'MSE',
     'alignment_distillation_weight': 1,
     'alignment_label_loss': True,
-    'alignment_label_loss': True,
-    'label_loss_weight': True,
+    'label_loss_weight': 1,
     'alignment_matching_epochs': 1,
 
 

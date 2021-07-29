@@ -359,11 +359,14 @@ class FedWorker:
     def coarse_eval(self, dls, last_trainer=None):
         self.gstep = max(0, self.gstep-1)
 
-        if last_trainer and last_trainer.state.eval_res:
-            for name, res in last_trainer.state.eval_res.items():
-                self.writer.add_scalar(name, res, self.gstep)
+        if last_trainer and hasattr(last_trainer.state, "eval_res"):
+            last_res = last_trainer.state.eval_res
+            for key in list(last_res.keys()):
+                last_res["coarse/"+key] = last_res[key]
+                self.writer.add_scalar("coarse/"+key, last_res[key], self.gstep)
+                del last_res[key]
             self.gstep += 1
-            return last_trainer.state.eval_res
+            return last_res
 
         return self.evaluate(None, "coarse", dls, add_stage=True)
 
@@ -969,7 +972,10 @@ def fed_main(cfg):
                 metrics.update({"global/combined_test/acc": evaluator.state.metrics['acc'],
                                 "global/combined_test/loss": evaluator.state.metrics['loss']})
                 global_worker.model.cpu()
-            else:
+            if cfg['global_model'] and cfg['global_model'] == 'fix':
+                metrics.update({"global/combined_test/acc": wandb.run.summary["global_init_public/acc"],
+                                "global/combined_test/loss": wandb.run.summary["global_init_public/acc"]})
+            elif not cfg['global_model']:
                 metrics.update({"global/combined_test/acc": metrics['local/combined_test/acc'],
                                 "global/combined_test/loss": metrics['local/combined_test/loss']})
             wandb.log(metrics)
