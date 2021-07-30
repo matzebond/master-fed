@@ -58,9 +58,6 @@ def build_parser():
         usage='%(prog)s [path/default_config_file.py] [options]'
     )
 
-    # parser.add_argument('config_file', default='config_test.py',
-    #                     help='the file from where to load the defaults')
-
     base = parser.add_argument_group('basic')
     base.add_argument('--parties', default=2, type=int, metavar='NUM',
                       help='number of parties participating in the collaborative training')
@@ -1035,10 +1032,11 @@ def fed_main(cfg):
     pool.terminate()
 
 
-    globs = (w.cfg['path'].glob("events.out.tfevents*") for w in workers)
-    util.reduce_tb_events_from_globs(globs,
-                                     cfg['path'] / "all",
-                                     reduce_ops = ["mean", "min", "max"])
+    # globs = (w.cfg['path'].glob("events.out.tfevents*") for w in workers)
+    # util.reduce_tb_events_from_globs(globs,
+    #                                  cfg['path'] / "all",
+    #                                  # reduce_ops = ["mean", "min", "max"])
+    #                                  reduce_ops = ["mean"])
 
     wandb.finish()
 
@@ -1113,7 +1111,11 @@ if __name__ == '__main__':
     if cfg['pool_size'] == 1:
         import multiprocessing.dummy as mp
         print("Using dummy for multiprocessing")
-        # mp.set_start_method('spawn')  #, force=True)
     else:
         mp.set_start_method('spawn')  #, force=True)
+
+    # from torch.profiler import profile, record_function, ProfilerActivity
+    # with profile(activities=[ProfilerActivity.CPU], record_shapes=True) as prof:
+    #     fed_main(cfg)
+    # print(prof.key_averages().table(sort_by="cpu_time_total", row_limit=10))
     fed_main(cfg)
