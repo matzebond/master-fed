@@ -105,8 +105,7 @@ def dataset_split(dataset):
 
 
 def save_models_to_artifact(cfg, workers, stage, metadata, filename=None):
-    if filename is None:
-        filename = stage
+    if filename is None: filename = stage
     model_artifact = wandb.Artifact(stage, type='model',
                                     metadata=metadata)
 
@@ -124,17 +123,20 @@ def save_models_to_artifact(cfg, workers, stage, metadata, filename=None):
         print(f'Model: Save "{stage}" models in offline mode')
     return model_artifact
 
-def load_models_from_artifact(cfg, workers, stage, version="latest"):
+def load_models_from_artifact(cfg, workers, stage, version="latest", filename=None):
+    if filename is None: filename = stage
     model_artifact = wandb.use_artifact(f"{stage}:{version}", type='model')
     artifact_path = Path(model_artifact.download())
     print(f'Model: Use "{stage}" model from version {model_artifact.version}')
 
     for rank, worker in enumerate(workers):
         p = Path.cwd() / artifact_path / f"r{rank}-m{cfg['model_mapping'][rank]}-{stage}.pth"
-        (worker.cfg['tmp'] / f"{stage}.pth").symlink_to(p)
+        (worker.cfg['tmp'] / f"{filename}.pth").symlink_to(p)
+        worker.model.load_state_dict(torch.load(p))
 
         p = Path.cwd() / artifact_path / f"r{rank}-m{cfg['model_mapping'][rank]}-{stage}_optim.pth"
-        (worker.cfg['tmp'] / f"{stage}_optim.pth").symlink_to(p)
+        (worker.cfg['tmp'] / f"{filename}_optim.pth").symlink_to(p)
+
 
     wandb.run.summary[f"{stage}/acc"] = model_artifact.metadata['acc']
     wandb.run.summary[f"{stage}/loss"] = model_artifact.metadata['loss']
