@@ -1,5 +1,4 @@
 global cfg
-from itertools import islice, cycle, repeat
 
 cfg = {
     'parties': 1,
@@ -8,8 +7,9 @@ cfg = {
 
     'model_variant': 'LPP', #'LeNet_plus_plus',
     'global_model_mapping': 4,
-    'projection_head': 500,
     'global_projection_head': 500,
+    'model_mapping': 1,
+    'projection_head': 500,
 
     'dataset': 'CIFAR10',
     'public_dataset': 'same',
@@ -25,7 +25,6 @@ cfg = {
     'replace_local_model': False,
     'keep_prev_model': False,
     'send_global': False,
-
 
     'global_init_public_epochs': 100,
 
@@ -45,7 +44,6 @@ cfg = {
     'label_loss_weight': 1,
     'alignment_matching_epochs': 1,
 
-
     'private_training_epochs': 0,
     'init_public_batch_size': 32,
     'init_private_batch_size': 32,
@@ -59,8 +57,7 @@ cfg = {
     'pool_size': 1,
 }
 
-cfg['model_mapping'] = list(repeat(1, cfg['parties']))
-
+# from itertools import islice, cycle, repeat
 # import FedMD
 # cfg['model_mapping'] =  list(islice(cycle(range(len(FedMD.FedMD_CIFAR.hyper))),
 #                                     cfg['parties']))
