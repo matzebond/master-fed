@@ -260,9 +260,11 @@ class FedWorker:
         self.prev_model = None
         self.gstep = 0
         self.optim_state = None
+        self.device = device
 
     def setup(self, optimizer_state=None, writer=True):
-        self.model = self.model.to(device)
+        self.decive = device
+        self.model = self.model.to(self.device)
 
         if self.cfg['optim'] == 'Adam':
             self.optimizer = torch.optim.Adam(
@@ -279,19 +281,19 @@ class FedWorker:
 
         if optimizer_state is not None:
             self.optimizer.load_state_dict(optimizer_state)
-            optim_to(self.optimizer, device)
+            optim_to(self.optimizer, self.device)
 
         self.trainer = create_supervised_trainer(
             self.model,
             self.optimizer,
             nn.CrossEntropyLoss(),
-            device,
+            self.device,
         )
         self.evaluator = create_supervised_evaluator(
             self.model,
             {"acc": ignite.metrics.Accuracy(),
              "loss": ignite.metrics.Loss(nn.CrossEntropyLoss())},
-            device)
+            self.device)
 
 
         self.private_dl = private_dls[self.cfg['rank']]
@@ -486,7 +488,7 @@ class FedWorker:
         self.setup(writer=False)
         def collect_alignment(engine, batch):
             self.model.train()
-            x = batch[0].to(device)
+            x = batch[0].to(self.device)
             with torch.no_grad():
                 logits, rep = self.model(x, output='both')
                 if self.cfg['alignment_target'] == 'rep' \
@@ -524,14 +526,14 @@ class FedWorker:
     def train_alignment(self, _, batch):
         self.model.train()
         self.optimizer.zero_grad()
-        x, y, targets = util.prepare_batch(batch, device=device)
+        x, y, targets = util.prepare_batch(batch, device=self.device)
         local_logits, local_rep = self.model(x, output='both')
         losses = []
 
         if self.cfg['alignment_contrastive_loss'] and \
            self.cfg['alignment_contrastive_loss'] == 'contrastive':
             num = x.size(0)
-            cos_dists = torch.tensor([], device=device)
+            cos_dists = torch.tensor([], device=self.device)
             for i in range(num):
                 tmp = torch.tile(local_rep[i], (num, 1))
                 cos = F.cosine_similarity(tmp, targets['rep']).reshape(1, -1)
@@ -540,7 +542,7 @@ class FedWorker:
 
             cos_dists /= self.cfg['contrastive_loss_temperature']
 
-            labels = torch.tensor(range(num), device=device, dtype=torch.long)
+            labels = torch.tensor(range(num), device=self.device, dtype=torch.long)
             loss_contrastive = F.cross_entropy(cos_dists, labels)
             losses.append(self.cfg['contrastive_loss_weight'] * loss_contrastive)
 
@@ -557,7 +559,7 @@ class FedWorker:
             alpha = nbrs.kneighbors_graph(targs, mode='distance')
             # g = g.eliminate_zeros()
             alpha.data = np.exp(-alpha.data)
-            alphaT = torch.tensor(alpha.toarray(), device=device)
+            alphaT = torch.tensor(alpha.toarray(), device=self.device)
 
             # dists = scidist.squareform(scidist.cdist(local_rep, norm2))
 
@@ -615,10 +617,10 @@ class FedWorker:
             del self.alignment_loss_fn
 
         if global_model:
-            self.global_model = global_model.to(device)
+            self.global_model = global_model.to(self.device)
             self.global_model.eval()
         if self.prev_model:
-            self.prev_model = self.prev_model.to(device)
+            self.prev_model = self.prev_model.to(self.device)
             self.prev_model.eval()
 
         collab_tr = Engine(self.train_collab)
@@ -644,7 +646,7 @@ class FedWorker:
     def train_collab(self, _, batch):
         self.model.train()
         self.optimizer.zero_grad()
-        x, y = util.prepare_batch(batch, device=device)
+        x, y = util.prepare_batch(batch, device=self.device)
         local_logits, local_rep = self.model(x, output='both')
         losses = []
 
@@ -662,7 +664,7 @@ class FedWorker:
             logits /= self.cfg['contrastive_loss_temperature']
 
             # first "class" sim(global_rep) is the ground truth
-            labels = torch.zeros(x.size(0), device=device).long()
+            labels = torch.zeros(x.size(0), device=self.device).long()
             loss_moon = F.cross_entropy(logits, labels)
             losses.append(self.cfg['contrastive_loss_weight'] * loss_moon)
 
