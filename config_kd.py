@@ -7,7 +7,9 @@ cfg = {
     'stages': ['global_init_public', 'init_public', 'init_private', 'collab', 'lower'],
 
     'model_variant': 'LPP', #'LeNet_plus_plus',
+    'global_model_mapping': 4,
     'projection_head': 500,
+    'global_projection_head': 500,
 
     'dataset': 'CIFAR10',
     'public_dataset': 'same',

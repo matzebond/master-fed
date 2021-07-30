@@ -75,7 +75,11 @@ def build_parser():
                        help='')
     model.add_argument('--model_mapping', nargs='*', type=int,
                        help='')
+    model.add_argument('--global_model_mapping', type=int,
+                       help='')
     model.add_argument('--projection_head', nargs='*', type=int, metavar='LAYER_SIZE',
+                       help='size of the projection head')
+    model.add_argument('--global_projection_head', type=int, metavar='LAYER_SIZE',
                        help='size of the projection head')
 
     # data
@@ -806,11 +810,10 @@ def fed_main(cfg):
                 w_cfg['path'] = cfg['path'] / str(w_cfg['rank'])
                 w_cfg['tmp'] = cfg['tmp'] / str(w_cfg['rank'])
                 model = getattr(models, cfg['model_variant'])
-                w_cfg['global_architecture'] = model.hyper[0]
-                # w_cfg['global_architecture'] = model.hyper[cfg['global_model_mapping']]
+                w_cfg['global_architecture'] = model.hyper[cfg['global_model_mapping']]
 
                 model = model(*w_cfg['global_architecture'],
-                              projection = cfg['projection_head'],
+                              projection = cfg['global_projection_head'],
                               n_classes = cfg['num_private_classes'],
                               input_size = public_train_data[0][0].shape)
                 global_worker = FedGlobalWorker(w_cfg, model)
