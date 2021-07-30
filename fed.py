@@ -418,12 +418,15 @@ class FedWorker:
                 epochs = self.cfg['init_private_epochs']
             self.trainer.run(self.private_dl, epochs)
 
-        torch.save(self.model.state_dict(), f"{self.cfg['tmp']}/init_private.pth")
-        torch.save(self.optimizer.state_dict(), f"{self.cfg['tmp']}/init_private_optim.pth")
-
-        res = 0, 0
         if epochs > 0:
             res = self.evaluator.state.metrics['acc'], self.evaluator.state.metrics['loss']
+            # self.trainer.state.eval_res
+            torch.save(self.model.state_dict(), f"{self.cfg['tmp']}/init_private.pth")
+            torch.save(self.optimizer.state_dict(), f"{self.cfg['tmp']}/init_private_optim.pth")
+        else:
+            res = 0, 0
+            (self.cfg['tmp'] / "init_private.pth").symlink_to("init_public.pth")
+            (self.cfg['tmp'] / "init_private_optim.pth").symlink_to("init_public_optim.pth")
         self.teardown()
         return res
 
@@ -833,11 +836,13 @@ def fed_main(cfg):
                                          "global_init_public",
                                          {"acc": acc, "loss": loss},
                                          filename="init_public")
+        global_worker.init_private(0)
     elif "load_global_init_public" in stages_todo:
         global_worker.model.change_classes(cfg['num_public_classes'])
         util.load_models_from_artifact(cfg, [global_worker],
                                        "global_init_public",
                                        filename="init_public")
+        global_worker.init_private(0)
 
     pool = mp.Pool(cfg['pool_size'], init_pool_process,
                    [dill.dumps(private_dls),
@@ -881,6 +886,7 @@ def fed_main(cfg):
 
     if "collab" in stages_todo:
         print("All parties starting with 'collab'")
+        global_worker.start_collab()
         res = pool.map(FedWorker.start_collab, workers)
         [workers, res] = list(zip(*res))
 
