@@ -109,11 +109,13 @@ def save_models_to_artifact(cfg, workers, stage, metadata, filename=None):
     model_artifact = wandb.Artifact(stage, type='model',
                                     metadata=metadata)
 
-    for rank, worker in enumerate(workers):
-        model_artifact.add_file(f"{worker.cfg['tmp']}/{filename}.pth",
-                                f"r{rank}-m{cfg['model_mapping'][rank]}-{stage}.pth")
-        model_artifact.add_file(f"{worker.cfg['tmp']}/{filename}_optim.pth",
-                                f"r{rank}-m{cfg['model_mapping'][rank]}-{stage}_optim.pth")
+    for worker in workers:
+        model_artifact.add_file(
+            f"{worker.cfg['tmp']}/{filename}.pth",
+            f"{worker.cfg['rank']}-v{worker.cfg['model_variant']}-m{worker.cfg['model_mapping']}-{stage}.pth")
+        model_artifact.add_file(
+            f"{worker.cfg['tmp']}/{filename}_optim.pth",
+            f"{worker.cfg['rank']}-v{worker.cfg['model_variant']}-m{worker.cfg['model_mapping']}-{stage}_optim.pth")
 
     wandb.log_artifact(model_artifact)
     try:
@@ -129,12 +131,12 @@ def load_models_from_artifact(cfg, workers, stage, version="latest", filename=No
     artifact_path = Path(model_artifact.download())
     print(f'Model: Use "{stage}" model from version {model_artifact.version}')
 
-    for rank, worker in enumerate(workers):
-        p = Path.cwd() / artifact_path / f"r{rank}-m{cfg['model_mapping'][rank]}-{stage}.pth"
+    for worker in workers:
+        p = Path.cwd() / artifact_path / f"{worker.cfg['rank']}-v{worker.cfg['model_variant']}-m{worker.cfg['model_mapping']}-{stage}.pth"
         (worker.cfg['tmp'] / f"{filename}.pth").symlink_to(p)
         worker.model.load_state_dict(torch.load(p))
 
-        p = Path.cwd() / artifact_path / f"r{rank}-m{cfg['model_mapping'][rank]}-{stage}_optim.pth"
+        p = Path.cwd() / artifact_path / f"{worker.cfg['rank']}-v{worker.cfg['model_variant']}-m{worker.cfg['model_mapping']}-{stage}_optim.pth"
         (worker.cfg['tmp'] / f"{filename}_optim.pth").symlink_to(p)
 
 

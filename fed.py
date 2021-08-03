@@ -806,7 +806,8 @@ def fed_main(cfg):
             w_cfg['path'] = cfg['path'] / str(w_cfg['rank'])
             w_cfg['tmp'] = cfg['tmp'] / str(w_cfg['rank'])
             model = getattr(models, w_cfg['model_variant'])
-            w_cfg['global_architecture'] = model.hyper[w_cfg['global_model_mapping']]
+            w_cfg['model_mapping'] = cfg['global_model_mapping']
+            w_cfg['global_architecture'] = model.hyper[w_cfg['model_mapping']]
 
             model = model(*w_cfg['global_architecture'],
                             projection = w_cfg['global_projection_head'],
