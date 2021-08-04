@@ -149,42 +149,47 @@ def build_parser():
 
     # variant
     variant = parser.add_argument_group('variant')
-    variant.add_argument('--variant', choices=['fedmd', 'fedavg', 'moon', 'fedcon'],
+    variant.add_argument('--variant', nargs="?",
+                         choices=['fedmd', 'fedavg', 'moon', 'fedcon'],
                          help='algorithm to use for the collaborative training, fixes some of the parameters in the \'variant\' group')
     variant.add_argument('--keep_prev_model', action='store_true',
                          help='parties keep the previous model (used for MOON contrastive loss)')
-    variant.add_argument('--global_model', choices=['fix', 'averaging', 'distillation'],
+    variant.add_argument('--global_model', nargs="?",
+                         choices=['fix', 'averaging', 'distillation'],
                          help='build a global model by the specified method')
     variant.add_argument('--replace_local_model', action='store_true',
                          help='replace the local model of the parties by the global model')
     variant.add_argument('--send_global', action='store_true',
                          help='send the global model to the parties')
-    variant.add_argument('--contrastive_loss', choices=['moon'],
+    variant.add_argument('--contrastive_loss', nargs="?", choices=['moon'],
                          help='contrastive loss for the collaborative training')
     variant.add_argument('--contrastive_loss_weight', type=int,
                          metavar='WEIGHT')
     variant.add_argument('--contrastive_loss_temperature', type=int,
                          metavar='TEMP')
-    variant.add_argument('--alignment_data', choices=['public', 'random'],
+    variant.add_argument('--alignment_data', nargs="?",
+                         choices=['public', 'random'],
                          help='data to use for the alignment step')
-    variant.add_argument('--alignment_target', choices=['logits', 'rep', 'both'],
+    variant.add_argument('--alignment_target', nargs="?",
+                         choices=['logits', 'rep', 'both'],
                          help='target to use for the alignment step')
     variant.add_argument('--alignment_label_loss', action='store_true',
                          help='use crossentropy to calculate loss on alignment targets')
-    variant.add_argument('--alignment_distillation_loss',
+    variant.add_argument('--alignment_distillation_loss', nargs="?",
                          choices=['MSE', 'L1', 'SmoothL1', 'KL'],
                          help='loss to align the alignment target on the alignment data')
-    variant.add_argument('--alignment_distillation_target', choices=['logits', 'rep', 'both'],
+    variant.add_argument('--alignment_distillation_target', nargs="?",
+                         choices=['logits', 'rep', 'both'],
                          help='target to use for the distillation loss')
     variant.add_argument('--alignment_distillation_weight', default=1, type=float,
                          metavar='WEIGHT',
                          help="weight for the alignment distillation loss")
-    variant.add_argument('--alignment_contrastive_loss',
+    variant.add_argument('--alignment_contrastive_loss', nargs="?",
                          choices=['contrastive', 'locality_preserving'],
                          help='contrastive loss to align the alignment target on the alignment data')
     variant.add_argument('--alignment_size', type=alignment_size_type, metavar='SIZE',
                          help='amount of instances to pick from the data for the alignment')
-    variant.add_argument('--alignment_aggregate', metavar='AGG',
+    variant.add_argument('--alignment_aggregate', nargs="?",
                          default='mean', choices=['mean', 'first', 'all', 'global'],
                          help='how to aggregate the alignment outputs of all parties')
     variant.add_argument('--alignment_matching_epochs', type=int,
