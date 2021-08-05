@@ -3,7 +3,7 @@ global cfg
 cfg = {
     'parties': 1,
     'collab_rounds': 100,
-    'stages': ['global_init_public', 'init_public', 'init_private', 'collab', 'lower'],
+    'stages': ['load_global_init_public', 'init_public', 'init_private', 'collab'],
 
     'model_variant': 'LPP', #'LeNet_plus_plus',
     'global_model_mapping': 4,
@@ -33,15 +33,14 @@ cfg = {
     'alignment_aggregate': 'global',
     'alignment_target': 'both',
     'alignment_temperature': 1,
-    'alignment_contrastive_loss': 'locality_preserving',
-    'contrastive_loss_weight': 1,
+    'alignment_additional_loss': 'locality_preserving',
+    'alignment_additional_loss_weight': 1,
     'locality_preserving_k': 5,
-    'locality_preserving_weight': 1,
     'alignment_distillation_target': 'logits',
     'alignment_distillation_loss': 'MSE',
     'alignment_distillation_weight': 1,
     'alignment_label_loss': True,
-    'label_loss_weight': 1,
+    'alignment_label_loss_weight': 1,
     'alignment_matching_epochs': 1,
 
     'private_training_epochs': 0,

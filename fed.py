@@ -163,9 +163,9 @@ def build_parser():
                          help='send the global model to the parties')
     variant.add_argument('--contrastive_loss', nargs="?", choices=['moon'],
                          help='contrastive loss for the collaborative training')
-    variant.add_argument('--contrastive_loss_weight', type=int,
+    variant.add_argument('--contrastive_loss_weight', type=float,
                          metavar='WEIGHT')
-    variant.add_argument('--contrastive_loss_temperature', type=int,
+    variant.add_argument('--contrastive_loss_temperature', type=float,
                          metavar='TEMP')
     variant.add_argument('--alignment_data', nargs="?",
                          choices=['public', 'random'],
@@ -175,6 +175,9 @@ def build_parser():
                          help='target to use for the alignment step')
     variant.add_argument('--alignment_label_loss', action='store_true',
                          help='use crossentropy to calculate loss on alignment targets')
+    variant.add_argument('--alignment_label_loss_weight', default=1, type=float,
+                         metavar='WEIGHT',
+                         help="weight for the additional alignment loss")
     variant.add_argument('--alignment_distillation_loss', nargs="?",
                          choices=['MSE', 'L1', 'SmoothL1', 'KL'],
                          help='loss to align the alignment target on the alignment data')
@@ -184,9 +187,12 @@ def build_parser():
     variant.add_argument('--alignment_distillation_weight', default=1, type=float,
                          metavar='WEIGHT',
                          help="weight for the alignment distillation loss")
-    variant.add_argument('--alignment_contrastive_loss', nargs="?",
+    variant.add_argument('--alignment_additional_loss', nargs="?",
                          choices=['contrastive', 'locality_preserving'],
-                         help='contrastive loss to align the alignment target on the alignment data')
+                         help='additional loss to align the alignment target on the alignment data')
+    variant.add_argument('--alignment_additional_loss_weight', default=1, type=float,
+                         metavar='WEIGHT',
+                         help="weight for the additional alignment loss")
     variant.add_argument('--alignment_size', type=alignment_size_type, metavar='SIZE',
                          help='amount of instances to pick from the data for the alignment')
     variant.add_argument('--alignment_aggregate', nargs="?",
@@ -197,7 +203,7 @@ def build_parser():
                          help='number of training epoch on the alignment data per collaborative round')
     variant.add_argument('--alignment_matching_batch_size', type=int, metavar='BATCHSIZE',
                          help='size of the mini-batches in the alignment')
-    variant.add_argument('--alignment_temperature', type=int, metavar='TEMP',
+    variant.add_argument('--alignment_temperature', type=float, metavar='TEMP',
                          help='temperature  alignment')
 
     # util
@@ -535,8 +541,8 @@ class FedWorker:
         local_logits, local_rep = self.model(x, output='both')
         losses = []
 
-        if self.cfg['alignment_contrastive_loss'] and \
-           self.cfg['alignment_contrastive_loss'] == 'contrastive':
+        if self.cfg['alignment_additional_loss'] and \
+           self.cfg['alignment_additional_loss'] == 'contrastive':
             num = x.size(0)
             cos_dists = torch.tensor([], device=self.device)
             for i in range(num):
@@ -549,10 +555,10 @@ class FedWorker:
 
             labels = torch.tensor(range(num), device=self.device, dtype=torch.long)
             loss_contrastive = F.cross_entropy(cos_dists, labels)
-            losses.append(self.cfg['contrastive_loss_weight'] * loss_contrastive)
+            losses.append(self.cfg['alignment_additional_loss_weight'] * loss_contrastive)
 
-        if self.cfg['alignment_contrastive_loss'] and \
-           self.cfg['alignment_contrastive_loss'] == 'locality_preserving':
+        if self.cfg['alignment_additional_loss'] and \
+           self.cfg['alignment_additional_loss'] == 'locality_preserving':
             # norm2 = lambda u, v: ((u-v)**2).sum()
             # k = self.cfg['locality_preserving_k'] + 1
             nbrs = NearestNeighbors(n_neighbors=self.cfg['locality_preserving_k'] + 1,
@@ -570,7 +576,7 @@ class FedWorker:
 
             dists = torch.cdist(local_rep, local_rep)
             loss_locality = torch.sum(torch.mul(dists, alphaT))
-            losses.append(self.cfg['contrastive_loss_weight'] * loss_locality)
+            losses.append(self.cfg['alignment_additional_loss_weight'] * loss_locality)
 
         if self.cfg['alignment_distillation_loss']:
             if self.cfg['alignment_distillation_target'] == 'logits' \
@@ -586,7 +592,7 @@ class FedWorker:
 
         if self.cfg['alignment_label_loss']:
             label_loss = F.cross_entropy(local_logits, y)
-            losses.append(label_loss)
+            losses.append(self.cfg['alignment_label_loss_weight'] * label_loss)
 
         loss = sum(losses)
         loss.backward()
