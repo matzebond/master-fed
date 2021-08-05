@@ -212,6 +212,7 @@ def build_parser():
                       help='number of processes')
     util.add_argument('--seed', default=0, type=int,
                       help="the seed with which to initialize numpy, torch, cuda and random")
+    util.add_argument('--name', help='name of the wandb run')
     util.add_argument('--resumable', action='store_true',
                       help="resume form the previous run (need to be resumable) if it chrashed")
 
@@ -709,6 +710,7 @@ class FedGlobalWorker(FedWorker):
 
 def fed_main(cfg):
     wandb.init(project='master-fed', entity='maschm',
+               name=cfg['name'],
                config=cfg, #sync_tensorboard=True,
                resume=cfg['resumable'])
     wandb.tensorboard.patch(root_logdir=wandb.run.dir, pytorch=True)
