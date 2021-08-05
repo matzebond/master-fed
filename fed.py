@@ -707,12 +707,12 @@ class FedGlobalWorker(FedWorker):
 
 
 def fed_main(cfg):
-    # wandb.tensorboard.patch(root_logdir="wandb/latest-run/files")
     wandb.init(project='master-fed', entity='maschm',
-               config=cfg, sync_tensorboard=True,
+               config=cfg, #sync_tensorboard=True,
                resume=cfg['resumable'])
-    print(cfg['resumable'], wandb.run.resumed)
+    wandb.tensorboard.patch(root_logdir=wandb.run.dir, pytorch=True)
 
+    print(cfg['resumable'], wandb.run.resumed)
     # wandb.save("./*/*event*", policy = 'end')
     cfg['path'] = Path(wandb.run.dir)
     cfg['tmp'] = cfg['path'] / '..' / 'tmp'
@@ -722,7 +722,6 @@ def fed_main(cfg):
         if not wandb.run.resumed:
             shutil.rmtree(cfg['tmp'], ignore_errors=True)
 
-    # wandb.tensorboard.patch(root_logdir=cfg['path'])
 
     public_train_data, public_test_data, private_train_data, private_test_data = \
         get_pub_priv(cfg['dataset'],
