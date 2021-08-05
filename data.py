@@ -231,7 +231,7 @@ def partition_moon(labels, parties = 10, classes_in_use = range(10),
 
 def partition_by_dist(targets, classes_in_use = range(10), dists = None):
     if dists is None:
-        dists = [[1/len(classes_in_use)] * classes_in_use]
+        dists = [[1/len(classes_in_use)] * len(classes_in_use)]
 
     counts = np.bincount(targets)
     counts = counts.take(classes_in_use)

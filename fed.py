@@ -844,13 +844,15 @@ def fed_main(cfg):
             util.save_models_to_artifact(cfg, [global_worker],
                                          "global_init_public",
                                          {"acc": acc, "loss": loss},
-                                         filename="init_public")
+                                         filename="init_public",
+                                         type=cfg['model_variant'])
         global_worker.init_private(0)
     elif "load_global_init_public" in stages_todo:
         global_worker.model.change_classes(cfg['num_public_classes'])
         util.load_models_from_artifact(cfg, [global_worker],
                                        "global_init_public",
-                                       filename="init_public")
+                                       filename="init_public",
+                                       type=cfg['model_variant'])
         global_worker.init_private(0)
 
     pool = mp.Pool(cfg['pool_size'], init_pool_process,
