@@ -505,13 +505,13 @@ class FedWorker:
                 if self.cfg['alignment_target'] == 'rep' \
                    or self.cfg['alignment_target'] == 'both':
                     if self.cfg['alignment_distillation_loss'] == 'KL':
-                        rep = F.softmax(rep, dim=-1)
+                        rep = F.log_softmax(rep, dim=-1)
                     engine.state.rep = torch.cat((engine.state.rep, rep.cpu()), dim=0)
                 if self.cfg['alignment_target'] == 'logits' \
                    or self.cfg['alignment_target'] == 'both':
                     logits = logits / self.cfg['alignment_temperature']
                     if self.cfg['alignment_distillation_loss'] == 'KL':
-                        logits = F.softmax(logits, dim=-1)
+                        logits = F.log_softmax(logits, dim=-1)
                     engine.state.logits = torch.cat((engine.state.logits, logits.cpu()), dim=0)
 
         alignment_ds = DataLoader(TensorDataset(alignment_data),
@@ -615,7 +615,7 @@ class FedWorker:
             if self.cfg['alignment_distillation_loss'] == "SmoothL1":
                 self.alignment_loss_fn = nn.SmoothL1Loss()
             if self.cfg['alignment_distillation_loss'] == "KL":
-                self.alignment_loss_fn = KLDivSoftmaxLoss()
+                self.alignment_loss_fn = KLDivSoftmaxLoss(log_target=True, reduction='batchmean')
             alignment_ds = MyTensorDataset(alignment_data, alignment_labels,
                                            alignment_targets)
             alignment_dl = DataLoader(alignment_ds, shuffle=True,

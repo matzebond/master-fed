@@ -40,7 +40,7 @@ def optim_to(optimizer, device):
     return optimizer
 
 
-class KLDivSoftmaxLoss(nn.modules.loss._WeightedLoss):
+class KLDivSoftmaxLoss(nn.modules.loss._Loss):
     __constants__ = ['reduction']
 
     def __init__(self, size_average=None, reduce=None, reduction: str = 'mean', log_target: bool = False) -> None:
@@ -48,6 +48,6 @@ class KLDivSoftmaxLoss(nn.modules.loss._WeightedLoss):
         self.log_target = log_target
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        return F.kl_div(F.softmax(input), target,
+        return F.kl_div(F.log_softmax(input, dim=-1), target,
                         reduction=self.reduction, log_target=self.log_target)
 
