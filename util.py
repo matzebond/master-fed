@@ -104,10 +104,9 @@ def dataset_split(dataset):
 
 
 
-def save_models_to_artifact(cfg, workers, stage, metadata,
-                            filename=None, type="model"):
+def save_models_to_artifact(cfg, workers, stage, metadata, filename=None):
     if filename is None: filename = stage
-    model_artifact = wandb.Artifact(stage, type=type,
+    model_artifact = wandb.Artifact(stage, type='model',
                                     metadata=metadata)
 
     for worker in workers:
@@ -126,10 +125,9 @@ def save_models_to_artifact(cfg, workers, stage, metadata,
         print(f'Model: Save "{stage}" models in offline mode')
     return model_artifact
 
-def load_models_from_artifact(cfg, workers, stage, version="latest",
-                              filename=None, type="model"):
+def load_models_from_artifact(cfg, workers, stage, version="latest", filename=None):
     if filename is None: filename = stage
-    model_artifact = wandb.use_artifact(f"{stage}:{version}", type=type)
+    model_artifact = wandb.use_artifact(f"{stage}:{version}", type='model')
     artifact_path = Path(model_artifact.download())
     print(f'Model: Use "{stage}" model from version {model_artifact.version}')
 
