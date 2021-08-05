@@ -498,21 +498,21 @@ class FedWorker:
     def get_alignment(self, alignment_data):
         self.setup(writer=False)
         def collect_alignment(engine, batch):
-            self.model.train()
+            self.model.train() # use train to match the rep during training
             x = batch[0].to(self.device)
             with torch.no_grad():
                 logits, rep = self.model(x, output='both')
-                if self.cfg['alignment_target'] == 'rep' \
-                   or self.cfg['alignment_target'] == 'both':
-                    if self.cfg['alignment_distillation_loss'] == 'KL':
-                        rep = F.log_softmax(rep, dim=-1)
-                    engine.state.rep = torch.cat((engine.state.rep, rep.cpu()), dim=0)
-                if self.cfg['alignment_target'] == 'logits' \
-                   or self.cfg['alignment_target'] == 'both':
-                    logits = logits / self.cfg['alignment_temperature']
-                    if self.cfg['alignment_distillation_loss'] == 'KL':
-                        logits = F.log_softmax(logits, dim=-1)
-                    engine.state.logits = torch.cat((engine.state.logits, logits.cpu()), dim=0)
+            if self.cfg['alignment_target'] == 'rep' \
+                or self.cfg['alignment_target'] == 'both':
+                if self.cfg['alignment_distillation_loss'] == 'KL':
+                    rep = F.log_softmax(rep, dim=-1)
+                engine.state.rep = torch.cat((engine.state.rep, rep.cpu()), dim=0)
+            if self.cfg['alignment_target'] == 'logits' \
+                or self.cfg['alignment_target'] == 'both':
+                logits = logits / self.cfg['alignment_temperature']
+                if self.cfg['alignment_distillation_loss'] == 'KL':
+                    logits = F.log_softmax(logits, dim=-1)
+                engine.state.logits = torch.cat((engine.state.logits, logits.cpu()), dim=0)
 
         alignment_ds = DataLoader(TensorDataset(alignment_data),
                                   batch_size=self.cfg['alignment_matching_batch_size'])
@@ -665,8 +665,9 @@ class FedWorker:
         losses.append(loss_target)
 
         if self.cfg['contrastive_loss'] == 'moon' and self.prev_model:
-            global_rep = self.global_model(x, output='rep_only')
-            prev_rep = self.prev_model(x, output='rep_only')
+            with torch.no_grad():
+                global_rep = self.global_model(x, output='rep_only')
+                prev_rep = self.prev_model(x, output='rep_only')
 
             pos = F.cosine_similarity(local_rep, global_rep, dim=-1).reshape(-1,1)
             neg = F.cosine_similarity(local_rep, prev_rep, dim=-1).reshape(-1,1)
