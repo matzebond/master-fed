@@ -20,11 +20,11 @@ cfg.update({
     'alignment_distillation_loss': 'KL',
     'alignment_distillation_weight': 2,
 
-    'alignment_label_loss': True,
+    'alignment_label_loss': False,
     'alignment_label_loss_weight': 1,
 
-    'private_training_epochs': 0,
-    'init_public_batch_size': 32,
-    'init_private_batch_size': 32,
     'alignment_matching_batch_size': 256,
+
+    # 'optim_lr': 0.001,
+    # 'optim_weight_decay': 0.9,
 })
