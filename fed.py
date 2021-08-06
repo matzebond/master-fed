@@ -120,7 +120,7 @@ def build_parser():
                           metavar='EPOCHS',
                           help='number of training epochs on the private data per collaborative round')
     # training.add_argument('--private_training_batch_size', default=5) # TODO not supported
-    training.add_argument('--optim', default='Adam', choices=['Adam', 'SGD'])
+    training.add_argument('--optim', default='Adam', choices=['Adam', 'SGD', 'RMSprop'])
     training.add_argument('--optim_lr', default=0.0001, type=float, metavar='LR',
                           help='learning rate for any training optimizer')
     training.add_argument('--optim_weight_decay', default=0, type=float, metavar='WD',
@@ -282,6 +282,11 @@ class FedWorker:
                 weight_decay=self.cfg['optim_weight_decay'])
         elif self.cfg['optim'] == 'SGD':
             self.optimizer = torch.optim.SGD(
+                self.model.parameters(),
+                lr=self.cfg['optim_lr'],
+                weight_decay=self.cfg['optim_weight_decay'])
+        elif self.cfg['optim'] == 'RMSprop':
+            self.optimizer = torch.optim.RMSprop(
                 self.model.parameters(),
                 lr=self.cfg['optim_lr'],
                 weight_decay=self.cfg['optim_weight_decay'])
