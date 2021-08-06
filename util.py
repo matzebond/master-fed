@@ -106,7 +106,8 @@ def dataset_split(dataset):
 
 def save_models_to_artifact(cfg, workers, stage, metadata, filename=None):
     if filename is None: filename = stage
-    model_artifact = wandb.Artifact(stage, type='model',
+    model_artifact = wandb.Artifact(f"{stage}-{cfg['model_variant']}",
+                                    type='model',
                                     metadata=metadata)
 
     for worker in workers:
@@ -127,7 +128,8 @@ def save_models_to_artifact(cfg, workers, stage, metadata, filename=None):
 
 def load_models_from_artifact(cfg, workers, stage, version="latest", filename=None):
     if filename is None: filename = stage
-    model_artifact = wandb.use_artifact(f"{stage}:{version}", type='model')
+    model_artifact = wandb.use_artifact(f"{stage}-{cfg['model_variant']}:{version}",
+                                        type='model')
     artifact_path = Path(model_artifact.download())
     print(f'Model: Use "{stage}" model from version {model_artifact.version}')
 
