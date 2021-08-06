@@ -11,13 +11,13 @@ cfg.update({
     'dataset': 'MNIST',
     'augmentation': False,
 
-    'alignment_additional_loss': 'locality_preserving',
+    'alignment_additional_loss': None,
     'alignment_additional_loss_weight': 1,
     'locality_preserving_k': 5,
 
     'alignment_temperature': 0.5,
-    'alignment_distillation_target': 'logits',
-    'alignment_distillation_loss': 'KL',
+    'alignment_distillation_target': None,
+    'alignment_distillation_loss': None,
     'alignment_distillation_weight': 2,
 
     'alignment_label_loss': False,
