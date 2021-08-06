@@ -112,10 +112,10 @@ def save_models_to_artifact(cfg, workers, stage, metadata, filename=None):
 
     for worker in workers:
         model_artifact.add_file(
-            f"{worker.cfg['tmp']}/{filename}.pth",
+            str(worker.cfg['tmp'] / f"{filename}.pth"),
             f"{worker.cfg['rank']}-v{worker.cfg['model_variant']}-m{worker.cfg['model_mapping']}-{stage}.pth")
         model_artifact.add_file(
-            f"{worker.cfg['tmp']}/{filename}_optim.pth",
+            str(worker.cfg['tmp'] / f"{filename}_optim.pth"),
             f"{worker.cfg['rank']}-v{worker.cfg['model_variant']}-m{worker.cfg['model_mapping']}-{stage}_optim.pth")
 
     wandb.log_artifact(model_artifact)

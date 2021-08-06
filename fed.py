@@ -403,8 +403,8 @@ class FedWorker:
                 epochs = self.cfg['init_public_epochs']
             self.trainer.run(public_train_dl, epochs)
 
-        torch.save(self.model.state_dict(), f"{self.cfg['tmp']}/init_public.pth")
-        torch.save(self.optimizer.state_dict(), f"{self.cfg['tmp']}/init_public_optim.pth")
+        torch.save(self.model.state_dict(), self.cfg['tmp'] / "init_public.pth")
+        torch.save(self.optimizer.state_dict(), self.cfg['tmp'] / "init_public_optim.pth")
 
         res = 0, 0
         if epochs > 0:
@@ -416,10 +416,10 @@ class FedWorker:
     @self_dec
     def init_private(self, epochs=None):
         print(f"party {self.cfg['rank']}: start 'init_private' stage")
-        self.model.load_state_dict(torch.load(f"{self.cfg['tmp']}/init_public.pth"))
+        self.model.load_state_dict(torch.load(self.cfg['tmp'] / "init_public.pth"))
         self.model.change_classes(self.cfg['num_private_classes'])
         self.gstep = 0
-        self.setup(torch.load(f"{self.cfg['tmp']}/init_public_optim.pth"))
+        self.setup(torch.load(self.cfg['tmp'] / "init_public_optim.pth"))
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "init_private", self.private_dls):
@@ -430,8 +430,8 @@ class FedWorker:
         if epochs > 0:
             res = self.evaluator.state.metrics['acc'], self.evaluator.state.metrics['loss']
             # self.trainer.state.eval_res
-            torch.save(self.model.state_dict(), f"{self.cfg['tmp']}/init_private.pth")
-            torch.save(self.optimizer.state_dict(), f"{self.cfg['tmp']}/init_private_optim.pth")
+            torch.save(self.model.state_dict(), self.cfg['tmp'] / "init_private.pth")
+            torch.save(self.optimizer.state_dict(), self.cfg['tmp'] / "init_private_optim.pth")
         else:
             res = 0, 0
             (self.cfg['tmp'] / "init_private.pth").symlink_to("init_public.pth")
@@ -443,10 +443,10 @@ class FedWorker:
     @self_dec
     def upper_bound(self, epochs=None):
         self.model.change_classes(self.cfg['num_public_classes'])
-        self.model.load_state_dict(torch.load(f"{self.cfg['tmp']}/init_public.pth"))
+        self.model.load_state_dict(torch.load(self.cfg['tmp'] / "init_public.pth"))
         self.model.change_classes(self.cfg['num_private_classes'])
         self.gstep = 0
-        self.setup(torch.load(f"{self.cfg['tmp']}/init_public_optim.pth"))
+        self.setup(torch.load(self.cfg['tmp'] / "init_public_optim.pth"))
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "upper", self.private_dls, add_stage=True):
@@ -465,9 +465,9 @@ class FedWorker:
 
     @self_dec
     def lower_bound(self, epochs=None):
-        self.model.load_state_dict(torch.load(f"{self.cfg['tmp']}/init_private.pth"))
+        self.model.load_state_dict(torch.load(self.cfg['tmp'] / "init_private.pth"))
         self.gstep = 0
-        self.setup(torch.load(f"{self.cfg['tmp']}/init_private_optim.pth"))
+        self.setup(torch.load(self.cfg['tmp'] / "init_private_optim.pth"))
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "lower", self.private_dls, add_stage=True):
@@ -485,8 +485,8 @@ class FedWorker:
 
     @self_dec
     def start_collab(self):
-        self.model.load_state_dict(torch.load(f"{self.cfg['tmp']}/init_private.pth"))
-        self.setup(torch.load(f"{self.cfg['tmp']}/init_private_optim.pth"))
+        self.model.load_state_dict(torch.load(self.cfg['tmp'] / "init_private.pth"))
+        self.setup(torch.load(self.cfg['tmp'] / "init_private_optim.pth"))
         print(f"party {self.cfg['rank']}: start 'collab' stage")
 
         # self.gstep = self.cfg['init_private_epochs']
@@ -597,7 +597,6 @@ class FedWorker:
 
         loss = sum(losses)
         loss.backward()
-
         self.optimizer.step()
         return loss.detach(), *(l.detach() for l in losses)
 
@@ -1020,8 +1019,8 @@ def fed_main(cfg):
 
     if "save_collab" in stages_todo:
         for w in workers:
-            torch.save(w.model.state_dict(), f"{w.cfg['tmp']}/final.pth")
-            torch.save(None, f"{w.cfg['tmp']}/final_optim.pth")
+            torch.save(w.model.state_dict(), w.cfg['tmp'] / "final.pth")
+            torch.save(None, w.cfg['tmp'] / "final_optim.pth")
         util.save_models_to_artifact(cfg, workers, "final",
                                      {"acc": metrics['global/combined_test/acc'],
                                       "loss": metrics['global/combined_test/loss']})
