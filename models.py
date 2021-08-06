@@ -1,13 +1,14 @@
 import torch
 from torch import nn
 import numpy as np
-from typing import Union, List, Optional, Tuple
+from typing import Union, List, Optional, Tuple, Type
 
 calc_size = lambda x, k, s, p: (x + 2*p - k)/s + 1
 
 # used in most models
 def build_projection_block(
         definition: Union[None, int, List[int]] = None,
+        nonlinear: Type[nn.Module] = nn.ReLU,
         last_nonlinear: bool = True,
         input_size: Tuple[int, int, int] = (3, 32, 32),
 ) -> Tuple[nn.Module, int]:
@@ -17,7 +18,7 @@ def build_projection_block(
         output_size = int(np.prod(output_size))
     else:
         output_size = int(np.prod(output_size))
-        proj = [nn.Flatten()]
+        proj: List[nn.Module] = [nn.Flatten()]
         if isinstance(definition, int):
             definition = [definition]
         for i in definition:
@@ -26,7 +27,7 @@ def build_projection_block(
             else:
                 proj.append(nn.Linear(output_size, i))
             output_size = proj[-1].out_features
-            proj.append(nn.ReLU())
+            proj.append(nonlinear())
         if last_nonlinear:
             projection = nn.Sequential(*proj)
         else:
@@ -118,7 +119,7 @@ class FedMD_CIFAR(nn.Module):
 
 
         self.projection, output_size = build_projection_block(
-            projection, projection_nonlinear, output_size)
+            projection, last_nonlinear=projection_nonlinear, input_size=output_size)
 
         self.output = nn.Linear(output_size, n_classes, bias = False)
 
@@ -196,7 +197,7 @@ class LPP(nn.Module):
         self.conv = nn.Sequential(*conv_block)
 
         self.projection, output_size = build_projection_block(
-            projection, projection_nonlinear, output_size)
+            projection, last_nonlinear=projection_nonlinear, input_size=output_size)
 
         self.output = nn.Linear(output_size, n_classes, bias=False)
 
@@ -246,6 +247,7 @@ class LeNet_plus_plus(nn.Module):
             nn.Conv2d(input_size[0], defi[0], kernel_size=5, stride=1, padding=2),
             nn.Conv2d(defi[0], defi[1], kernel_size=5, stride=1, padding=2),
             nn.BatchNorm2d(defi[1]),
+            nn.PReLU(),
             nn.MaxPool2d(kernel_size=2, stride=2)
         )
         output_size = (defi[1], 14, 14)  # 28 X 28 --> 14 X 14
@@ -254,6 +256,7 @@ class LeNet_plus_plus(nn.Module):
             nn.Conv2d(defi[1], defi[2], kernel_size=5, stride=1, padding=2),
             nn.Conv2d(defi[2], defi[3], kernel_size=5, stride=1, padding=2),
             nn.BatchNorm2d(defi[3]),
+            nn.PReLU(),
             nn.MaxPool2d(kernel_size=2, stride=2)
         )
         output_size = (defi[3], 7, 7)  # 14 X 14 --> 7 X 7
@@ -262,13 +265,15 @@ class LeNet_plus_plus(nn.Module):
             nn.Conv2d(defi[3], defi[4], kernel_size=5, stride=1, padding=2),
             nn.Conv2d(defi[4], defi[5], kernel_size=5, stride=1, padding=2),
             nn.BatchNorm2d(defi[5]),
+            nn.PReLU(),
             nn.MaxPool2d(kernel_size=2, stride=2)
         )
         output_size = (defi[5], 3, 3)  # 7 X 7 --> 3 X 3
 
         projection = defi[6]
         self.projection, output_size = build_projection_block(
-            projection, True, output_size)
+            projection, input_size=output_size,
+            nonlinear=nn.PReLU, last_nonlinear=True)
 
         self.output = nn.Linear(output_size, n_classes)
 
