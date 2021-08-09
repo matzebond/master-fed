@@ -205,6 +205,8 @@ def build_parser():
                          help='size of the mini-batches in the alignment')
     variant.add_argument('--alignment_temperature', type=float, metavar='TEMP',
                          help='temperature  alignment')
+    variant.add_argument('--locality_preserving_k', default=5, type=int, metavar='K',
+                         help='the number of neighbors to use in the locality preserving loss')
 
     # util
     util = parser.add_argument_group('etc')
