@@ -350,20 +350,18 @@ class FedWorker:
     def evaluate(self, trainer, stage, dls, add_stage=False, advance=True):
         if trainer:
             print(f"{stage} [{trainer.state.epoch:2d}/{trainer.state.max_epochs:2d}]")
+            title = f"{stage}/training" if add_stage else "training"
 
-            losses = []
-            try:
-                total_loss, *losses = trainer.state.output
-                total_loss = total_loss.item()
-                losses = [l.item() for l in losses]
-            except Exception:
+            losses = {}
+            if len(trainer.state.output) > 1:
+                total_loss, losses = trainer.state.output
+                for key, loss in losses.items():
+                    self.writer.add_scalar(f"{title}/loss_{key}", loss, self.gstep)
+            else:
                 total_loss = trainer.state.output
 
-            title = f"{stage}/training" if add_stage else "training"
-            print(f"{title} loss:", total_loss, "- parts:", *losses)
+            print(f"{title} loss:", total_loss, "- parts:", losses)
             self.writer.add_scalar(f"{title}/loss", total_loss, self.gstep)
-            for i, loss in enumerate(losses):
-                self.writer.add_scalar(f"{title}/loss_{i+1}", loss, self.gstep)
 
         res = {}
         for name, dl in dls.items():
@@ -547,7 +545,7 @@ class FedWorker:
         self.optimizer.zero_grad()
         x, y, targets = util.prepare_batch(batch, device=self.device)
         local_logits, local_rep = self.model(x, output='both')
-        losses = []
+        losses = {}
 
         if self.cfg['alignment_additional_loss'] and \
            self.cfg['alignment_additional_loss'] == 'contrastive':
@@ -563,10 +561,18 @@ class FedWorker:
 
             labels = torch.tensor(range(num), device=self.device, dtype=torch.long)
             loss_contrastive = F.cross_entropy(cos_dists, labels)
-            losses.append(self.cfg['alignment_additional_loss_weight'] * loss_contrastive)
+            losses['con'] = self.cfg['alignment_additional_loss_weight'] * loss_contrastive
 
         if self.cfg['alignment_additional_loss'] and \
            self.cfg['alignment_additional_loss'] == 'locality_preserving':
+            # for i in range(num):
+            #     other = random.choice([n for n in range(num) if n != i])
+            #     print(cos_dists[i][i].detach(), cos_dists[i][other].detach())
+
+            # print(self.cfg['rank'])
+            # print("pos sum", sum(cos_dists[i][i].detach() for i in range(num)))
+            # print("loss sum", loss.detach())
+
             # norm2 = lambda u, v: ((u-v)**2).sum()
             # k = self.cfg['locality_preserving_k'] + 1
             nbrs = NearestNeighbors(n_neighbors=self.cfg['locality_preserving_k'] + 1,
@@ -584,28 +590,28 @@ class FedWorker:
 
             dists = torch.cdist(local_rep, local_rep)
             loss_locality = torch.sum(torch.mul(dists, alphaT))
-            losses.append(self.cfg['alignment_additional_loss_weight'] * loss_locality)
+            losses['lp'] = self.cfg['alignment_additional_loss_weight'] * loss_locality
 
         if self.cfg['alignment_distillation_loss']:
             if self.cfg['alignment_distillation_target'] == 'logits' \
                 or self.cfg['alignment_distillation_target'] == 'both':
                 local_logits = local_logits / self.cfg['alignment_temperature']
                 distill_loss = self.alignment_loss_fn(local_logits, targets['logits'])
-                losses.append(self.cfg['alignment_distillation_weight'] * distill_loss)
+                losses['dist-logit'] = self.cfg['alignment_distillation_weight'] * distill_loss
             if self.cfg['alignment_distillation_target'] == 'rep' \
                 or self.cfg['alignment_distillation_target'] == 'both':
                 local_rep = local_rep / self.cfg['alignment_temperature']
                 distill_loss = self.alignment_loss_fn(local_logits, targets['rep'])
-                losses.append(self.cfg['alignment_distillation_weight'] * distill_loss)
+                losses['dist-rep'] = self.cfg['alignment_distillation_weight'] * distill_loss
 
         if self.cfg['alignment_label_loss']:
             label_loss = F.cross_entropy(local_logits, y)
-            losses.append(self.cfg['alignment_label_loss_weight'] * label_loss)
+            losses['ce'] = self.cfg['alignment_label_loss_weight'] * label_loss
 
-        loss = sum(losses)
+        loss = sum(losses.values())
         loss.backward()
         self.optimizer.step()
-        return loss.detach(), *(l.detach() for l in losses)
+        return loss.detach().item(), {k: l.detach().item() for k,l in losses.items()}
 
 
     @self_dec
@@ -666,10 +672,10 @@ class FedWorker:
         self.optimizer.zero_grad()
         x, y = util.prepare_batch(batch, device=self.device)
         local_logits, local_rep = self.model(x, output='both')
-        losses = []
+        losses = {}
 
         loss_target = F.cross_entropy(local_logits, y)
-        losses.append(loss_target)
+        losses['ce'] = loss_target
 
         if self.cfg['contrastive_loss'] == 'moon' and self.prev_model:
             with torch.no_grad():
@@ -685,12 +691,12 @@ class FedWorker:
             # first "class" sim(global_rep) is the ground truth
             labels = torch.zeros(x.size(0), device=self.device).long()
             loss_moon = F.cross_entropy(logits, labels)
-            losses.append(self.cfg['contrastive_loss_weight'] * loss_moon)
+            losses['con'] = self.cfg['contrastive_loss_weight'] * loss_moon
 
-        loss = sum(losses)
+        loss = sum(losses.values())
         loss.backward()
         self.optimizer.step()
-        return loss.detach(), *(l.detach() for l in losses)
+        return loss.detach().item(), {k: l.detach().item() for k,l in losses}
 
 
 class FedGlobalWorker(FedWorker):
