@@ -275,7 +275,7 @@ class LeNet_plus_plus(nn.Module):
             projection, input_size=output_size,
             nonlinear=nn.PReLU, last_nonlinear=True)
 
-        self.output = nn.Linear(output_size, n_classes)
+        self.output = nn.Linear(output_size, n_classes, bias = False)
 
     def change_classes(self, n_classes):
         if n_classes == self.output.out_features:

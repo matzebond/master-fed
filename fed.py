@@ -353,7 +353,8 @@ class FedWorker:
             title = f"{stage}/training" if add_stage else "training"
 
             losses = {}
-            if len(trainer.state.output) > 1:
+            if isinstance(trainer.state.output, tuple) \
+               and len(trainer.state.output) > 1:
                 total_loss, losses = trainer.state.output
                 for key, loss in losses.items():
                     self.writer.add_scalar(f"{title}/loss_{key}", loss, self.gstep)
