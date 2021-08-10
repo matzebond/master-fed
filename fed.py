@@ -31,7 +31,7 @@ import thop
 import ast
 
 import models
-from data import get_pub_priv, load_idx_from_artifact, build_private_dls
+from data import get_priv_pub_data, load_idx_from_artifact, build_private_dls
 import util
 from util import MyTensorDataset, set_seed
 from nn import (KLDivSoftmaxLoss, avg_params, optim_to)
@@ -738,12 +738,12 @@ def fed_main(cfg):
             shutil.rmtree(cfg['tmp'], ignore_errors=True)
 
 
-    public_train_data, public_test_data, private_train_data, private_test_data = \
-        get_pub_priv(cfg['dataset'],
-                     public=cfg['public_dataset'],
-                     root=cfg['datafolder'],
-                     augment=cfg['augmentation'],
-                     normalize=cfg['normalization'])
+    private_train_data, private_test_data, public_train_data, public_test_data = \
+        get_priv_pub_data(cfg['dataset'],
+                          public=cfg['public_dataset'],
+                          root=cfg['datafolder'],
+                          augment=cfg['augmentation'],
+                          normalize=cfg['normalization'])
 
     if cfg['classes'] is None or len(cfg['classes']) == 0:
         cfg['classes'] = list(range(len(private_train_data.classes)))

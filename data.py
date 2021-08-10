@@ -35,7 +35,7 @@ augmentation = transforms.Compose([
     transforms.RandomHorizontalFlip(),
 ])
 
-def get_pub_priv(private, public=None, root="data", normalize=True, augment=True):
+def get_priv_pub_data(private, public=None, root="data", normalize=True, augment=True):
     if public is None:
         if private == "CIFAR10":
             public = "CIFAR100"
@@ -90,7 +90,7 @@ def get_pub_priv(private, public=None, root="data", normalize=True, augment=True
         download=False,
         transform=transform_test
     )
-    return pub_train, pub_test, priv_train, priv_test
+    return priv_train, priv_test, pub_train, pub_test,
 
 
 private_subcats = [
