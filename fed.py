@@ -219,6 +219,7 @@ def build_parser():
     util.add_argument('--seed', default=0, type=int,
                       help="the seed with which to initialize numpy, torch, cuda and random")
     util.add_argument('--name', help='name of the wandb run')
+    util.add_argument('--artifact_project', help='load artifacts from this wandb project')
     util.add_argument('--resumable', action='store_true',
                       help="resume form the previous run (need to be resumable) if it chrashed")
     util.add_argument('--umap', action='store_true',
@@ -721,6 +722,8 @@ class FedGlobalWorker(FedWorker):
 
 
 def fed_main(cfg):
+    if cfg['artifact_project'] is None:
+        cfg['artifact_project'] = "maschm/master-fed"
     wandb.init(project='master-fed', entity='maschm',
                name=cfg['name'],
                config=cfg, #sync_tensorboard=True,
@@ -866,7 +869,8 @@ def fed_main(cfg):
         global_worker.model.change_classes(cfg['num_public_classes'])
         util.load_models_from_artifact(cfg, [global_worker],
                                        "global_init_public",
-                                       filename="init_public")
+                                       filename="init_public",
+                                       project=cfg['artifact_project'])
         global_worker.init_private(0)
 
     pool = mp.Pool(cfg['pool_size'], init_pool_process,
@@ -891,7 +895,8 @@ def fed_main(cfg):
     elif "load_init_public" in stages_todo:
         for w in workers:
             w.model.change_classes(cfg['num_public_classes'])
-        util.load_models_from_artifact(cfg, workers, "init_public")
+        util.load_models_from_artifact(cfg, workers, "init_public",
+                                       project=cfg['artifact_project'])
 
     if "init_private" in stages_todo:
         print("All parties starting with 'init_private'")
@@ -907,7 +912,8 @@ def fed_main(cfg):
     elif "load_init_private" in stages_todo:
         for w in workers:
             w.model.change_classes(cfg['num_private_classes'])
-        util.load_models_from_artifact(cfg, workers, "init_private")
+        util.load_models_from_artifact(cfg, workers, "init_private",
+                                       project=cfg['artifact_project'])
 
     if "collab" in stages_todo:
         print("All parties starting with 'collab'")

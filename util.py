@@ -126,12 +126,13 @@ def save_models_to_artifact(cfg, workers, stage, metadata, filename=None):
         print(f'Model: Save "{stage}" models in offline mode')
     return model_artifact
 
-def load_models_from_artifact(cfg, workers, stage, version="latest", filename=None):
+def load_models_from_artifact(cfg, workers, stage, version="latest",
+                              filename=None, project="maschm/master-fed"):
     if filename is None: filename = stage
-    model_artifact = wandb.use_artifact(f"{stage}-{cfg['model_variant']}:{version}",
+    model_artifact = wandb.use_artifact(f"{project}/{stage}-{cfg['model_variant']}:{version}",
                                         type='model')
     artifact_path = Path(model_artifact.download())
-    print(f'Model: Use "{stage}" model from version {model_artifact.version}')
+    print(f'Model: Use artifact "{model_artifact.name}"')
 
     for worker in workers:
         p = Path.cwd() / artifact_path / f"{worker.cfg['rank']}-v{worker.cfg['model_variant']}-m{worker.cfg['model_mapping']}-{stage}.pth"
