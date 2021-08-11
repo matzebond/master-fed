@@ -411,6 +411,8 @@ class FedWorker:
                 epochs = self.cfg['init_public_epochs']
             self.trainer.run(public_train_dl, epochs)
 
+        self.model.cpu()
+        optim_to(self.optimizer, torch.device('cpu'))
         torch.save(self.model.state_dict(), self.cfg['tmp'] / "init_public.pth")
         torch.save(self.optimizer.state_dict(), self.cfg['tmp'] / "init_public_optim.pth")
 
@@ -438,6 +440,8 @@ class FedWorker:
         if epochs > 0:
             res = self.evaluator.state.metrics['acc'], self.evaluator.state.metrics['loss']
             # self.trainer.state.eval_res
+            self.model.cpu()
+            optim_to(self.optimizer, torch.device('cpu'))
             torch.save(self.model.state_dict(), self.cfg['tmp'] / "init_private.pth")
             torch.save(self.optimizer.state_dict(), self.cfg['tmp'] / "init_private_optim.pth")
         else:
