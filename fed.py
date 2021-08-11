@@ -564,17 +564,14 @@ class FedWorker:
             con_loss = alignment_contrastive_loss(
                 local_rep,
                 targets['rep'],
-                self.cfg['contrastive_loss_temperature'],
-                self.device
-            )
+                self.cfg['contrastive_loss_temperature'])
             losses['con'] = self.cfg['alignment_additional_loss_weight'] * con_loss
 
         if self.cfg['alignment_additional_loss'] and \
            self.cfg['alignment_additional_loss'] == 'locality_preserving':
             lp_loss = locality_preserving_loss(local_rep,
                                                targets['rep'].cpu(),
-                                               self.cfg['locality_preserving_k'],
-                                               self.device)
+                                               self.cfg['locality_preserving_k'])
             losses['lp'] = self.cfg['alignment_additional_loss_weight'] * lp_loss
 
         if self.cfg['alignment_distillation_loss']:

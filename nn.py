@@ -77,9 +77,9 @@ def moon_contrastive_loss(x, local_rep, global_model, prev_model, temperature, d
     labels = torch.zeros(x.size(0), device=device).long()
     return F.cross_entropy(logits, labels)
 
-def alignment_contrastive_loss(local_rep, target_rep, temperature, device="cpu"):
+def alignment_contrastive_loss(local_rep, target_rep, temperature=1):
     num = local_rep.shape[0]
-    cos_dists = torch.tensor([], device=device)
+    cos_dists = torch.tensor([], device=target_rep.device)
     for i in range(num):
         tmp = torch.tile(local_rep[i], (num, 1))
         cos = F.cosine_similarity(tmp, target_rep).reshape(1, -1)
@@ -88,31 +88,27 @@ def alignment_contrastive_loss(local_rep, target_rep, temperature, device="cpu")
 
     cos_dists /= temperature
 
-    labels = torch.tensor(range(num), device=device, dtype=torch.long)
+    labels = torch.tensor(range(num), device=local_rep.device, dtype=torch.long)
     return F.cross_entropy(cos_dists, labels)
 
-def locality_preserving_loss(local_rep, target_rep, locality_preserving_k=5, device="cpu"):
-    # for i in range(num):
-    #     other = random.choice([n for n in range(num) if n != i])
-    #     print(cos_dists[i][i].detach(), cos_dists[i][other].detach())
-
-    # print(self.cfg['rank'])
-    # print("pos sum", sum(cos_dists[i][i].detach() for i in range(num)))
-    # print("loss sum", loss.detach())
-
+def locality_preserving_loss(local_rep, target_rep, locality_preserving_k=5):
     # norm2 = lambda u, v: ((u-v)**2).sum()
-    # k = self.cfg['locality_preserving_k'] + 1
     nbrs = NearestNeighbors(n_neighbors=locality_preserving_k + 1,
-                            algorithm='ball_tree')
+                            algorithm='ball_tree',
+                            metric="euclidean",
                             # metric="pyfunc",
-                            # metric_params={"func": norm2})
+                            # metric_params={"func": norm2}
+                            )
     nbrs = nbrs.fit(target_rep)
     alpha = nbrs.kneighbors_graph(target_rep, mode='distance')
     # g = g.eliminate_zeros()
-    alpha.data = np.exp(-alpha.data)
-    alphaT = torch.tensor(alpha.toarray(), device=device)
+    sigma = 100
+    alpha.data = np.exp(-np.power(alpha.data, 2)/sigma)
+    alphaT = torch.tensor(alpha.toarray(), device=local_rep.device)
 
     # dists = scidist.squareform(scidist.cdist(local_rep, norm2))
 
-    dists = torch.cdist(local_rep, local_rep)
-    return torch.sum(torch.mul(dists, alphaT))
+    dists = torch.cdist(local_rep, local_rep, p=2)
+    dists = dists.pow(2)
+    losses = torch.mul(dists, alphaT)
+    return torch.sum(losses) / local_rep.shape[0]#, alpha, alphaT, dists, losses
