@@ -27,12 +27,14 @@ from ignite.engine import (Engine, Events,
                            create_supervised_trainer,
                            create_supervised_evaluator)
 import thop
+import matplotlib.pyplot as plt
 import ast
 
 import models
 from data import get_priv_pub_data, load_idx_from_artifact, build_private_dls
 import util
 from util import MyTensorDataset, set_seed
+import umap_util
 from nn import (KLDivSoftmaxLoss, avg_params, optim_to,
                 locality_preserving_loss,
                 alignment_contrastive_loss,
@@ -219,6 +221,8 @@ def build_parser():
     util.add_argument('--name', help='name of the wandb run')
     util.add_argument('--resumable', action='store_true',
                       help="resume form the previous run (need to be resumable) if it chrashed")
+    util.add_argument('--umap', action='store_true',
+                      help="use UMAP to create a 2d visualization from the representations of the model")
 
 
     return parser
@@ -670,6 +674,30 @@ class FedWorker:
         self.optimizer.step()
         return loss.detach().item(), {k: l.detach().item() for k,l in losses}
 
+    @torch.no_grad()
+    def umap_viz(self, data, test_data):
+        self.setup()
+        self.model.eval()
+
+        labels, reps = umap_util.reps_from_models(self.model, data, max_size=1000)
+        test_labels, test_reps = umap_util.reps_from_models(self.model, test_data, max_size=1000)
+        labels, reps, test_labels, test_reps = \
+            (t.to("cpu") for t in (labels, reps, test_labels, test_reps))
+
+        embeds, umapper = umap_util.create_umap_embedings(reps)
+        test_embeds, _ = umap_util.create_umap_embedings(test_reps, reducer=umapper)
+        # torch.save(embeds, self.cfg['tmp'] / 'embeds.pth')
+        # torch.save(test_embeds, self.cfg['tmp'] / 'test_embeds.pth')
+
+        ax, sc, fig = umap_util.build_scatter(embeds, labels)
+        umap_util.build_colorlegend(fig, data.classes)
+        ax, sc, test_fig = umap_util.build_scatter(test_embeds, test_labels)
+        umap_util.build_colorlegend(test_fig, data.classes)
+        wandb.log({"viz train embeding": wandb.Image(fig),
+                   "viz test embeding": wandb.Image(test_fig)})
+
+        self.teardown()
+
 
 class FedGlobalWorker(FedWorker):
     def __init__(self, cfg, model):
@@ -826,6 +854,8 @@ def fed_main(cfg):
         _, (acc, loss) = global_worker.init_public(cfg['global_init_public_epochs'])
         wandb.run.summary["global_init_public/acc"] = acc
         wandb.run.summary["global_init_public/loss"] = loss
+        if cfg['umap']:
+            global_worker.umap_viz(public_train_data, public_test_data)
         if "save_global_init_public" in stages_todo:
             util.save_models_to_artifact(cfg, [global_worker],
                                          "global_init_public",
@@ -1001,6 +1031,14 @@ def fed_main(cfg):
                 if cfg['global_model']:
                     torch.save(global_worker, cfg['tmp'] / "global.pt")
                 print("saved resuable state for round", n)
+
+        if cfg['umap']:
+            for w in workers:
+                w.umap_viz(public_train_data, public_test_data)
+            # Starting a Matplotlib GUI outside of the main thread will likely fail.
+            # res = pool.starmap(FedWorker.umap_viz,
+            #                    zip(workers,
+            #                        repeat(public_test_data)))
 
     if "save_collab" in stages_todo:
         for w in workers:
