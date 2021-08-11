@@ -20,7 +20,6 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Subset, TensorDataset
 from torch.utils.tensorboard import SummaryWriter
 import torch.multiprocessing as mp
-# from multiprocessing.pool import Pool
 import ignite
 import ignite.metrics
 from ignite.engine import (Engine, Events,
@@ -68,8 +67,8 @@ def build_parser():
     base.add_argument('--collab_rounds', default=5, type=int, metavar='NUM',
                       help='number of round in the collaboration phase')
     base.add_argument('--stages', nargs='*',
-                      default=['init_public', 'init_private', 'collab', 'upper', 'lower'],
-                      choices=['global_init_public', 'save_global_init_public', 'load_global_init_public', 'init_public', 'save_init_public', 'load_init_public', 'init_private', 'save_init_private', 'load_init_private', 'collab', 'save_collab', 'upper', 'lower'],
+                      default=['init_public', 'init_private', 'collab'],
+                      choices=['global_init_public', 'save_global_init_public', 'load_global_init_public', 'init_public', 'save_init_public', 'load_init_public', 'init_private', 'save_init_private', 'load_init_private', 'collab', 'save_collab'],
                       help='list of phases that are executed (default: %(default)s)')
 
     # model
@@ -148,8 +147,12 @@ def build_parser():
     training.add_argument('--init_private_batch_size', default=32, type=int,
                           metavar='BATCHSIZE',
                           help='size of the mini-batches in the initial private training')
-    training.add_argument('--upper_bound_epochs', default=50, type=int, metavar='EPOCHS')
-    training.add_argument('--lower_bound_epochs', default=50, type=int, metavar='EPOCHS')
+    training.add_argument('--upper_bound_epochs', default=None, type=int,
+                          metavar='EPOCHS',
+                          help="if specified calc the upper bound (EPOCHS on all combined training data)")
+    training.add_argument('--lower_bound_epochs', default=None, type=int,
+                          metavar='EPOCHS',
+                          help="if specified calc the lower bound (EPOCHS only on the private training data)")
 
     # variant
     variant = parser.add_argument_group('variant')
@@ -1051,7 +1054,7 @@ def fed_main(cfg):
                                      {"acc": metrics['global/combined_test/acc'],
                                       "loss": metrics['global/combined_test/loss']})
 
-    if "upper" in stages_todo:
+    if cfg['upper_bound_epochs']:
         print("All parties starting with 'upper'")
         res = pool.map(FedWorker.upper_bound, workers)
         [workers, res] = list(zip(*res))
@@ -1059,7 +1062,7 @@ def fed_main(cfg):
         wandb.run.summary["upper/acc"] = np.average(acc)
         wandb.run.summary["upper/loss"] = np.average(loss)
 
-    if "lower" in stages_todo:
+    if cfg['lower_bound_epochs']:
         print("All parties starting with 'lower'")
         res = pool.map(FedWorker.lower_bound, workers)
         [workers, res] = list(zip(*res))

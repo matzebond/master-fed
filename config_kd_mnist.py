@@ -12,16 +12,16 @@ cfg.update({
     'augmentation': False,
 
     'alignment_additional_loss': None,
-    'alignment_additional_loss_weight': None,
-    'locality_preserving_k': None,
+    'alignment_additional_loss_weight': 1,
+    'locality_preserving_k': 5,
 
-    'alignment_temperature': None,
+    'alignment_temperature': 0.5,
     'alignment_distillation_target': None,
     'alignment_distillation_loss': None,
-    'alignment_distillation_weight': None,
+    'alignment_distillation_weight': 2,
 
     'alignment_label_loss': False,
-    'alignment_label_loss_weight': None,
+    'alignment_label_loss_weight': 1,
 
     'alignment_matching_batch_size': 256,
 

@@ -2,7 +2,7 @@ global cfg
 
 cfg = {
     'parties': 1,
-    'collab_rounds': 100,
+    'collab_rounds': 1,
     'stages': ['load_global_init_public', 'init_public', 'init_private', 'collab', 'save_collab'],
 
     'model_variant': 'LPP',
@@ -41,7 +41,7 @@ cfg = {
     'alignment_distillation_weight': 2,
     'alignment_label_loss': False,
     'alignment_label_loss_weight': 1,
-    'alignment_matching_epochs': 1,
+    'alignment_matching_epochs': 100,
 
     'private_training_epochs': 0,
     'init_public_batch_size': 32,
@@ -52,7 +52,7 @@ cfg = {
     # 'optim_weight_decay': 0.9,
 
     # 'upper_bound_epochs': 100,
-    'lower_bound_epochs': 100,
+    # 'lower_bound_epochs': 100,
 
     'pool_size': 1,
 }
