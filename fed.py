@@ -26,7 +26,6 @@ import ignite.metrics
 from ignite.engine import (Engine, Events,
                            create_supervised_trainer,
                            create_supervised_evaluator)
-from sklearn.neighbors import NearestNeighbors
 import thop
 import ast
 
@@ -34,7 +33,10 @@ import models
 from data import get_priv_pub_data, load_idx_from_artifact, build_private_dls
 import util
 from util import MyTensorDataset, set_seed
-from nn import (KLDivSoftmaxLoss, avg_params, optim_to)
+from nn import (KLDivSoftmaxLoss, avg_params, optim_to,
+                locality_preserving_loss,
+                alignment_contrastive_loss,
+                moon_contrastive_loss)
 
 
 individual_cfgs = ['model_mapping', 'init_public_epochs', 'init_private_epochs', 'collab_participation', 'private_training_epochs']
@@ -550,48 +552,21 @@ class FedWorker:
 
         if self.cfg['alignment_additional_loss'] and \
            self.cfg['alignment_additional_loss'] == 'contrastive':
-            num = x.size(0)
-            cos_dists = torch.tensor([], device=self.device)
-            for i in range(num):
-                tmp = torch.tile(local_rep[i], (num, 1))
-                cos = F.cosine_similarity(tmp, targets['rep']).reshape(1, -1)
-                cos_dists = torch.cat((cos_dists, cos), dim=0)
-                # print(self.cfg['rank'], cos)
-
-            cos_dists /= self.cfg['contrastive_loss_temperature']
-
-            labels = torch.tensor(range(num), device=self.device, dtype=torch.long)
-            loss_contrastive = F.cross_entropy(cos_dists, labels)
-            losses['con'] = self.cfg['alignment_additional_loss_weight'] * loss_contrastive
+            con_loss = alignment_contrastive_loss(
+                local_rep,
+                targets['rep'],
+                self.cfg['contrastive_loss_temperature'],
+                self.device
+            )
+            losses['con'] = self.cfg['alignment_additional_loss_weight'] * con_loss
 
         if self.cfg['alignment_additional_loss'] and \
            self.cfg['alignment_additional_loss'] == 'locality_preserving':
-            # for i in range(num):
-            #     other = random.choice([n for n in range(num) if n != i])
-            #     print(cos_dists[i][i].detach(), cos_dists[i][other].detach())
-
-            # print(self.cfg['rank'])
-            # print("pos sum", sum(cos_dists[i][i].detach() for i in range(num)))
-            # print("loss sum", loss.detach())
-
-            # norm2 = lambda u, v: ((u-v)**2).sum()
-            # k = self.cfg['locality_preserving_k'] + 1
-            nbrs = NearestNeighbors(n_neighbors=self.cfg['locality_preserving_k'] + 1,
-                                    algorithm='ball_tree')
-                                    # metric="pyfunc",
-                                    # metric_params={"func": norm2})
-            targs = targets['rep'].cpu()
-            nbrs = nbrs.fit(targs)
-            alpha = nbrs.kneighbors_graph(targs, mode='distance')
-            # g = g.eliminate_zeros()
-            alpha.data = np.exp(-alpha.data)
-            alphaT = torch.tensor(alpha.toarray(), device=self.device)
-
-            # dists = scidist.squareform(scidist.cdist(local_rep, norm2))
-
-            dists = torch.cdist(local_rep, local_rep)
-            loss_locality = torch.sum(torch.mul(dists, alphaT))
-            losses['lp'] = self.cfg['alignment_additional_loss_weight'] * loss_locality
+            lp_loss = locality_preserving_loss(local_rep,
+                                               targets['rep'].cpu(),
+                                               self.cfg['locality_preserving_k'],
+                                               self.device)
+            losses['lp'] = self.cfg['alignment_additional_loss_weight'] * lp_loss
 
         if self.cfg['alignment_distillation_loss']:
             if self.cfg['alignment_distillation_target'] == 'logits' \
@@ -679,20 +654,12 @@ class FedWorker:
         losses['ce'] = loss_target
 
         if self.cfg['contrastive_loss'] == 'moon' and self.prev_model:
-            with torch.no_grad():
-                global_rep = self.global_model(x, output='rep_only')
-                prev_rep = self.prev_model(x, output='rep_only')
-
-            pos = F.cosine_similarity(local_rep, global_rep, dim=-1).reshape(-1,1)
-            neg = F.cosine_similarity(local_rep, prev_rep, dim=-1).reshape(-1,1)
-
-            logits = torch.cat((pos, neg), dim=1)
-            logits /= self.cfg['contrastive_loss_temperature']
-
-            # first "class" sim(global_rep) is the ground truth
-            labels = torch.zeros(x.size(0), device=self.device).long()
-            loss_moon = F.cross_entropy(logits, labels)
-            losses['con'] = self.cfg['contrastive_loss_weight'] * loss_moon
+            moon_loss = moon_contrastive_loss(
+                x, local_rep, self.global_model, self.prev_model,
+                self.cfg['contrastive_loss_temperature'],
+                self.device
+            )
+            losses['con'] = self.cfg['contrastive_loss_weight'] * moon_loss
 
         loss = sum(losses.values())
         loss.backward()
