@@ -15,7 +15,7 @@ def reps_from_models(models, data, max_size=None, batch_size=64):
     for i, model in enumerate(models):
         reps = []
         for x, _ in dl:
-            rep = model(x, output="rep_only")
+            rep = model(x.to(next(model.parameters()).device), output="rep_only")
             reps.append(rep)
             if max_size and len(reps)*batch_size > max_size:
                 break
@@ -35,7 +35,7 @@ def create_umap_embedings(reps, reducer=None):
     return embed, reducer
 
 
-def build_scatter(embeds, labels, fig=None, spec=[], cmap='jet'):
+def build_scatter(embeds, labels, fig=None, spec=[], cmap='jet', size=1):
     if fig is None: fig = plt.figure()
     if spec: spec = [spec]
 
@@ -44,7 +44,7 @@ def build_scatter(embeds, labels, fig=None, spec=[], cmap='jet'):
         ax_args['projection'] = '3d'
         ax_args['zticks'] = []
     ax = fig.add_subplot(*spec , **ax_args)
-    sc = ax.scatter(*embeds.T, s=1, c=labels, cmap=cmap)
+    sc = ax.scatter(*embeds.T, s=size, c=labels, cmap=cmap)
     return ax, sc, fig
 
 

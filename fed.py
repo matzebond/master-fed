@@ -680,8 +680,8 @@ class FedWorker:
         self.setup()
         self.model.eval()
 
-        labels, reps = umap_util.reps_from_models(self.model, data, max_size=1000)
-        test_labels, test_reps = umap_util.reps_from_models(self.model, test_data, max_size=1000)
+        labels, reps = umap_util.reps_from_models(self.model, data)
+        test_labels, test_reps = umap_util.reps_from_models(self.model, test_data)
         labels, reps, test_labels, test_reps = \
             (t.to("cpu") for t in (labels, reps, test_labels, test_reps))
 
@@ -690,9 +690,9 @@ class FedWorker:
         # torch.save(embeds, self.cfg['tmp'] / 'embeds.pth')
         # torch.save(test_embeds, self.cfg['tmp'] / 'test_embeds.pth')
 
-        ax, sc, fig = umap_util.build_scatter(embeds, labels)
+        ax, sc, fig = umap_util.build_scatter(embeds, labels, size=0.5)
         umap_util.build_colorlegend(fig, data.classes)
-        ax, sc, test_fig = umap_util.build_scatter(test_embeds, test_labels)
+        ax, sc, test_fig = umap_util.build_scatter(test_embeds, test_labels, size=0.5)
         umap_util.build_colorlegend(test_fig, data.classes)
         wandb.log({"viz train embeding": wandb.Image(fig),
                    "viz test embeding": wandb.Image(test_fig)})
