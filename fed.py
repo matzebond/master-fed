@@ -68,7 +68,7 @@ def build_parser():
                       help='number of round in the collaboration phase')
     base.add_argument('--stages', nargs='*',
                       default=['init_public', 'init_private', 'collab'],
-                      choices=['global_init_public', 'save_global_init_public', 'load_global_init_public', 'init_public', 'save_init_public', 'load_init_public', 'init_private', 'save_init_private', 'load_init_private', 'collab', 'save_collab'],
+                      choices=['global_init_public', 'save_global_init_public', 'load_global_init_public', 'init_public', 'save_init_public', 'load_init_public', 'init_public_from_global' , 'init_private', 'save_init_private', 'load_init_private', 'collab', 'save_collab'],
                       help='list of phases that are executed (default: %(default)s)')
 
     # model
@@ -908,6 +908,12 @@ def fed_main(cfg):
             w.model.change_classes(cfg['num_public_classes'])
         util.load_models_from_artifact(cfg, workers, "init_public",
                                        project=cfg['artifact_project'])
+    elif "init_public_from_global" in stages_todo:
+        global_output_weights = global_worker.model.get_parameter("output.weight").detach()
+        for w in workers:
+            output_weights = w.model.get_parameter("output.weight")
+            output_weights.requires_grad_(False).copy_(global_output_weights)
+            w.save_model_tmp("init_public", include_optimizer=False)
 
     if "init_private" in stages_todo:
         print("All parties starting with 'init_private'")
