@@ -280,12 +280,7 @@ class FedWorker:
         self.model = model
         self.prev_model = None
         self.gstep = 0
-        self.optim_state = None
         self.device = device
-
-    def setup(self, optimizer_state=None, writer=True):
-        self.decive = device
-        self.model = self.model.to(self.device)
 
         if self.cfg['optim'] == 'Adam':
             self.optimizer = torch.optim.Adam(
@@ -305,9 +300,10 @@ class FedWorker:
         else:
             raise Exception('unknown optimizer ' + self.cfg['optim'])
 
-        if optimizer_state is not None:
-            self.optimizer.load_state_dict(optimizer_state)
-            optim_to(self.optimizer, self.device)
+    def setup(self, writer=True):
+        self.decive = device
+        self.model = self.model.to(self.device)
+        optim_to(self.optimizer, self.device)
 
         self.trainer = create_supervised_trainer(
             self.model,
@@ -321,7 +317,6 @@ class FedWorker:
              "loss": ignite.metrics.Loss(nn.CrossEntropyLoss())},
             self.device)
 
-
         self.private_dl = private_dls[self.cfg['rank']]
         self.private_test_dl = private_test_dls[self.cfg['rank']]
         self.public_dls  = {"public_train": public_train_dl,
@@ -333,15 +328,13 @@ class FedWorker:
         self.writer = SummaryWriter(self.cfg['path']) if writer else None
 
 
-    def teardown(self, save_optimizer=False):
-        if save_optimizer:
-            self.optim_state = optim_to(self.optimizer, "cpu").state_dict()
-
-        del self.optimizer, self.trainer, self.evaluator
+    def teardown(self):
+        del self.trainer, self.evaluator
         del self.private_dl, self.private_test_dl, self.public_dls, self.private_dls
         del self.writer
 
         self.model = self.model.cpu()
+        self.optimizer = optim_to(self.optimizer, "cpu")
 
 
     def finish(self):
@@ -403,6 +396,17 @@ class FedWorker:
 
         return self.evaluate(None, "coarse", dls, add_stage=True)
 
+    def save_model_tmp(self, stage, include_optimizer=True):
+        torch.save(self.model.state_dict(), self.cfg['tmp'] / f"{stage}.pth")
+        optim_state = self.optimizer.state_dict() if include_optimizer else None
+        torch.save(optim_state, self.cfg['tmp'] / f"{stage}_optim.pth")
+
+    def load_model_tmp(self, from_stage, include_optimizer=True):
+        self.model.load_state_dict(torch.load(self.cfg['tmp'] / f"{from_stage}.pth"))
+        if include_optimizer:
+            optim_state = torch.load(self.cfg['tmp'] / f"{from_stage}_optim.pth")
+            if optim_state:
+                self.optimizer.load_state_dict(optim_state)
 
     @self_dec
     def init_public(self, epochs=None):
@@ -421,8 +425,7 @@ class FedWorker:
 
         self.model.cpu()
         optim_to(self.optimizer, torch.device('cpu'))
-        torch.save(self.model.state_dict(), self.cfg['tmp'] / "init_public.pth")
-        torch.save(self.optimizer.state_dict(), self.cfg['tmp'] / "init_public_optim.pth")
+        self.save_model_tmp("init_public")
 
         res = 0, 0
         if epochs > 0:
@@ -434,10 +437,10 @@ class FedWorker:
     @self_dec
     def init_private(self, epochs=None):
         print(f"party {self.cfg['rank']}: start 'init_private' stage")
-        self.model.load_state_dict(torch.load(self.cfg['tmp'] / "init_public.pth"))
+        self.load_model_tmp("init_public")
         self.model.change_classes(self.cfg['num_private_classes'])
         self.gstep = 0
-        self.setup(torch.load(self.cfg['tmp'] / "init_public_optim.pth"))
+        self.setup()
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "init_private", self.private_dls):
@@ -450,8 +453,7 @@ class FedWorker:
             # self.trainer.state.eval_res
             self.model.cpu()
             optim_to(self.optimizer, torch.device('cpu'))
-            torch.save(self.model.state_dict(), self.cfg['tmp'] / "init_private.pth")
-            torch.save(self.optimizer.state_dict(), self.cfg['tmp'] / "init_private_optim.pth")
+            self.save_model_tmp("init_private")
         else:
             res = 0, 0
             (self.cfg['tmp'] / "init_private.pth").symlink_to("init_public.pth")
@@ -463,10 +465,10 @@ class FedWorker:
     @self_dec
     def upper_bound(self, epochs=None):
         self.model.change_classes(self.cfg['num_public_classes'])
-        self.model.load_state_dict(torch.load(self.cfg['tmp'] / "init_public.pth"))
+        self.load_model_tmp("init_public")
         self.model.change_classes(self.cfg['num_private_classes'])
         self.gstep = 0
-        self.setup(torch.load(self.cfg['tmp'] / "init_public_optim.pth"))
+        self.setup()
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "upper", self.private_dls, add_stage=True):
@@ -485,9 +487,9 @@ class FedWorker:
 
     @self_dec
     def lower_bound(self, epochs=None):
-        self.model.load_state_dict(torch.load(self.cfg['tmp'] / "init_private.pth"))
+        self.load_model_tmp("init_private")
         self.gstep = 0
-        self.setup(torch.load(self.cfg['tmp'] / "init_private_optim.pth"))
+        self.setup()
 
         with self.trainer.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
                                             "lower", self.private_dls, add_stage=True):
@@ -505,14 +507,14 @@ class FedWorker:
 
     @self_dec
     def start_collab(self):
-        self.model.load_state_dict(torch.load(self.cfg['tmp'] / "init_private.pth"))
-        self.setup(torch.load(self.cfg['tmp'] / "init_private_optim.pth"))
+        self.load_model_tmp("init_private")
+        self.setup()
         print(f"party {self.cfg['rank']}: start 'collab' stage")
 
         # self.gstep = self.cfg['init_private_epochs']
         res = self.coarse_eval(self.private_dls)
 
-        self.teardown(save_optimizer=True)
+        self.teardown()
         return res
 
 
@@ -602,7 +604,7 @@ class FedWorker:
     @self_dec
     def collab_round(self, alignment_data=None, alignment_labels=None,
                      alignment_targets=None, global_model=None):
-        self.setup(self.optim_state)
+        self.setup()
 
         if alignment_data != None and alignment_targets != None:
             self.alignment_loss_fn = None
@@ -643,7 +645,7 @@ class FedWorker:
         else:
             res = self.coarse_eval(self.private_dls, alignment_tr)
 
-        self.teardown(save_optimizer=True)
+        self.teardown()
         if self.cfg['keep_prev_model']:
             del self.prev_model
             self.prev_model = copy.deepcopy(self.model)
@@ -1048,8 +1050,7 @@ def fed_main(cfg):
 
     if "save_collab" in stages_todo:
         for w in workers:
-            torch.save(w.model.state_dict(), w.cfg['tmp'] / "final.pth")
-            torch.save(None, w.cfg['tmp'] / "final_optim.pth")
+            w.save_model_tmp("final", include_optimizer=False)
         util.save_models_to_artifact(cfg, workers, "final",
                                      {"acc": metrics['global/combined_test/acc'],
                                       "loss": metrics['global/combined_test/loss']})
