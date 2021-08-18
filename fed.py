@@ -586,7 +586,7 @@ class FedWorker:
             if self.cfg['alignment_distillation_target'] == 'rep' \
                 or self.cfg['alignment_distillation_target'] == 'both':
                 local_rep = local_rep / self.cfg['alignment_temperature']
-                distill_loss = self.alignment_loss_fn(local_logits, targets['rep'])
+                distill_loss = self.alignment_loss_fn(local_rep, targets['rep'])
                 losses['dist-rep'] = self.cfg['alignment_distillation_weight'] * distill_loss
 
         if self.cfg['alignment_label_loss']:
