@@ -102,8 +102,8 @@ def locality_preserving_loss(local_rep, target_rep, locality_preserving_k=5):
     nbrs = nbrs.fit(target_rep)
     alpha = nbrs.kneighbors_graph(target_rep, mode='distance')
     # g = g.eliminate_zeros()
-    sigma = 100
-    alpha.data = np.exp(-np.power(alpha.data, 2)/sigma)
+    sigma = 10
+    alpha.data = np.exp(-np.power(alpha.data, 2)/(sigma**2))
     alphaT = torch.tensor(alpha.toarray(), device=local_rep.device)
 
     # dists = scidist.squareform(scidist.cdist(local_rep, norm2))
