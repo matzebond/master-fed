@@ -186,7 +186,7 @@ def build_parser():
                          metavar='WEIGHT',
                          help="weight for the additional alignment loss")
     variant.add_argument('--alignment_distillation_loss', nargs="?",
-                         choices=['MSE', 'L1', 'SmoothL1', 'KL'],
+                         choices=['MSE', 'L1', 'SmoothL1', 'CE', 'KL'],
                          help='loss to align the alignment target on the alignment data')
     variant.add_argument('--alignment_distillation_target', nargs="?",
                          choices=['logits', 'rep', 'both'],
@@ -616,6 +616,8 @@ class FedWorker:
                 self.alignment_loss_fn = nn.L1Loss()
             if self.cfg['alignment_distillation_loss'] == "SmoothL1":
                 self.alignment_loss_fn = nn.SmoothL1Loss()
+            if self.cfg['alignment_distillation_loss'] == "CE":
+                self.alignment_loss_fn = nn.CrossEntropyLoss()
             if self.cfg['alignment_distillation_loss'] == "KL":
                 self.alignment_loss_fn = KLDivSoftmaxLoss(log_target=True, reduction='batchmean')
             alignment_ds = MyTensorDataset(alignment_data, alignment_labels,
