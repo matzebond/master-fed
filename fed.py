@@ -527,6 +527,7 @@ class FedWorker:
                 logits, rep = self.model(x, output='both')
             if self.cfg['alignment_target'] == 'rep' \
                 or self.cfg['alignment_target'] == 'both':
+                rep = rep / self.cfg['alignment_temperature']
                 if self.cfg['alignment_distillation_loss'] == 'KL':
                     rep = F.softmax(rep, dim=-1)
                 engine.state.rep = torch.cat((engine.state.rep, rep.cpu()), dim=0)
@@ -564,17 +565,24 @@ class FedWorker:
         local_logits, local_rep = self.model(x, output='both')
         losses = {}
 
+        if self.cfg['alignment_label_loss']:
+            label_loss = F.cross_entropy(local_logits, y)
+            losses['ce'] = self.cfg['alignment_label_loss_weight'] * label_loss
+
+        temp_rep = local_rep / self.cfg['alignment_temperature']
+        temp_logits = local_logits / self.cfg['alignment_temperature']
+
         if self.cfg['alignment_additional_loss'] and \
            self.cfg['alignment_additional_loss'] == 'contrastive':
             con_loss = alignment_contrastive_loss(
-                local_rep,
+                temp_rep,
                 targets['rep'],
                 self.cfg['contrastive_loss_temperature'])
             losses['con'] = self.cfg['alignment_additional_loss_weight'] * con_loss
 
         if self.cfg['alignment_additional_loss'] and \
            self.cfg['alignment_additional_loss'] == 'locality_preserving':
-            lp_loss = locality_preserving_loss(local_rep,
+            lp_loss = locality_preserving_loss(temp_rep,
                                                targets['rep'].cpu(),
                                                self.cfg['locality_preserving_k'])
             losses['lp'] = self.cfg['alignment_additional_loss_weight'] * lp_loss
@@ -582,18 +590,12 @@ class FedWorker:
         if self.cfg['alignment_distillation_loss']:
             if self.cfg['alignment_distillation_target'] == 'logits' \
                 or self.cfg['alignment_distillation_target'] == 'both':
-                local_logits = local_logits / self.cfg['alignment_temperature']
-                distill_loss = self.alignment_loss_fn(local_logits, targets['logits'])
+                distill_loss = self.alignment_loss_fn(temp_logits, targets['logits'])
                 losses['dist-logit'] = self.cfg['alignment_distillation_weight'] * distill_loss
             if self.cfg['alignment_distillation_target'] == 'rep' \
                 or self.cfg['alignment_distillation_target'] == 'both':
-                local_rep = local_rep / self.cfg['alignment_temperature']
-                distill_loss = self.alignment_loss_fn(local_rep, targets['rep'])
+                distill_loss = self.alignment_loss_fn(temp_rep, targets['rep'])
                 losses['dist-rep'] = self.cfg['alignment_distillation_weight'] * distill_loss
-
-        if self.cfg['alignment_label_loss']:
-            label_loss = F.cross_entropy(local_logits, y)
-            losses['ce'] = self.cfg['alignment_label_loss_weight'] * label_loss
 
         loss = sum(losses.values())
         loss.backward()
@@ -664,9 +666,12 @@ class FedWorker:
         loss_target = F.cross_entropy(local_logits, y)
         losses['ce'] = loss_target
 
+        temp_rep = local_rep / self.cfg['alignment_temperature']
+        # temp_logits = local_logits / self.cfg['alignment_temperature']
+
         if self.cfg['contrastive_loss'] == 'moon' and self.prev_model:
             moon_loss = moon_contrastive_loss(
-                x, local_rep, self.global_model, self.prev_model,
+                x, temp_rep, self.global_model, self.prev_model,
                 self.cfg['contrastive_loss_temperature'],
                 self.device
             )
