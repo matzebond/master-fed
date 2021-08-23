@@ -3,12 +3,12 @@ global cfg
 cfg = {
     'parties': 1,
     'collab_rounds': 1,
-    'stages': ['load_global_init_public', 'init_public', 'init_private', 'collab', 'save_collab'],
+    'stages': ['load_global_init_public', 'init_public_from_global', 'init_private', 'collab', 'save_collab'],
 
     'model_variant': 'LPP',
     'global_model_mapping': 4,
     'global_projection_head': 500,
-    'model_mapping': 1,
+    # 'model_mapping': 1,
     'projection_head': 500,
 
     'dataset': 'CIFAR10',
@@ -28,20 +28,23 @@ cfg = {
 
     'global_init_public_epochs': 100,
 
+    'alignment_matching_epochs': 100,
     'alignment_data': 'public',
     'alignment_size': 'full',
     'alignment_aggregate': 'global',
     'alignment_target': 'both',
+
     'alignment_temperature': 0.5,
     'alignment_additional_loss': None,
     'alignment_additional_loss_weight': 1,
     'locality_preserving_k': 5,
+
     'alignment_distillation_target': None,
     'alignment_distillation_loss': None,
     'alignment_distillation_weight': 2,
+
     'alignment_label_loss': False,
     'alignment_label_loss_weight': 1,
-    'alignment_matching_epochs': 100,
 
     'private_training_epochs': 0,
     'init_public_batch_size': 32,
@@ -61,3 +64,7 @@ cfg = {
 # import FedMD
 # cfg['model_mapping'] =  list(islice(cycle(range(len(FedMD.FedMD_CIFAR.hyper))),
 #                                     cfg['parties']))
+
+cfg.update({
+    'model_mapping': cfg['global_model_mapping']
+})
