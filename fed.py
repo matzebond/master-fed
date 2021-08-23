@@ -227,6 +227,8 @@ def build_parser():
                       help="resume form the previous run (need to be resumable) if it chrashed")
     util.add_argument('--umap', action='store_true',
                       help="use UMAP to create a 2d visualization from the representations of the model")
+    util.add_argument('--test', action='store_true',
+                      help="makes some code regions more expressive while ignoring additional work")
 
 
     return parser
@@ -926,19 +928,22 @@ def fed_main(cfg):
 
     if "collab" in stages_todo:
         print("All parties starting with 'collab'")
-        global_worker.start_collab()
-        res = pool.map(FedWorker.start_collab, workers)
-        [workers, res] = list(zip(*res))
+        if not cfg['test']:
+            global_worker.start_collab()
+            res = pool.map(FedWorker.start_collab, workers)
+            [workers, res] = list(zip(*res))
 
-        metrics = defaultdict(float)
-        for d in res:
-            for k in d:
-                local = k.replace("coarse", "local")
-                metrics[local] += d[k]
-        for k in metrics:
-            metrics[k] /= len(res)
+            metrics = defaultdict(float)
+            for d in res:
+                for k in d:
+                    local = k.replace("coarse", "local")
+                    metrics[local] += d[k]
+            for k in metrics:
+                metrics[k] /= len(res)
 
-        wandb.log(metrics)
+            wandb.log(metrics)
+        else:
+            print("skipping initial collab evaluation")
 
         for n in range(start_round, cfg['collab_rounds']):
             print(f"All parties starting with collab round [{n+1}/{cfg['collab_rounds']}]")
