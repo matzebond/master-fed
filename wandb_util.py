@@ -59,3 +59,25 @@ def create_embeding_image_for_run(run_id, data, train_data, allow_global=True):
     cfg = run.config
     cfg['rank'] = "-1" if is_global else "0"
     worker = fed.FedWorker(cfg, model)
+
+def rename_config_entry(old, new, project="maschm/master-fed", filters = None):
+    runs = api.runs(project, filters)
+    for run in runs:
+        if not old in run.config:
+            continue
+        print(run.name)
+
+        run.config[new] = run.config[old]
+        del run.config[old]
+        run.save()
+
+def add_summary_entry(old, new, project="maschm/master-fed", filters = None):
+    runs = api.runs(project, filters)
+    for run in runs:
+        if not old in run.summary:
+            continue
+        print(run.name)
+
+        run.summary[new] = run.summary[old]
+        # del run.config[old]
+        run.save()
