@@ -105,6 +105,8 @@ def build_parser():
                       help='parameter of the dirichlet distribution used to produce a non-iid data distribution for the private data, a higher values will produce more iid distributions (a float value, "iid" or "single_class" is expected)')
     data.add_argument('--samples', type=int, metavar='SAMPLES',
                       help='if normalizing per class specifies the samples per class chosen from the training dataset. if normalizing per party specifies the samples per party chosen from the training dataset. The default is to use all data and not to sample down.')
+    data.add_argument('--min_per_class', type=int, default=0,
+                      help="minimum number of data points every party gets from every class")
     data.add_argument('--partition_overlap', action='store_true',
                       help='')
     data.add_argument('--no-augmentation', action='store_false', dest="augmentation",
@@ -728,9 +730,6 @@ class FedGlobalWorker(FedWorker):
 
         self.model.load_state_dict(global_weights)
 
-        combined_test_dl
-        public_test_dl
-
 
 def fed_main(cfg):
     if cfg['artifact_project'] is None:
@@ -1036,6 +1035,7 @@ def fed_main(cfg):
             elif not cfg['global_model']:
                 metrics.update({"global/combined_test/acc": metrics['local/combined_test/acc'],
                                 "global/combined_test/loss": metrics['local/combined_test/loss']})
+            # log summary for global and local models
             wandb.log(metrics)
 
             # TODO should this go to the start of the loop?

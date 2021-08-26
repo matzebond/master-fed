@@ -128,7 +128,8 @@ def clean_round(array: np.ndarray) -> np.ndarray:
     return res
 
 def partition_data(labels, parties = 10, classes_in_use = range(10),
-                   normalize = "class", samples = None, concentration = 'iid',
+                   normalize = "class", samples = None,
+                   concentration = 'iid', min_per_class = 0,
                    data_overlap = False, balance = True):
     if concentration == 'iid':
         concentration = 1e10
@@ -145,8 +146,9 @@ def partition_data(labels, parties = 10, classes_in_use = range(10),
     dists = np.array([])
     for _ in range(10000):  # dont block infinite when balancing
         if concentration > 0.005:
-            dists = np.random.dirichlet(np.repeat(concentration, len(classes_in_use)),
-                                        parties)
+            dists = np.random.dirichlet(
+                np.repeat(concentration, len(classes_in_use)),
+                parties)
         else: # below 0.005 numpys dirichlet gives NaN rows
             dists = np.zeros((parties, len(classes_in_use)))
             for p, c in zip(range(parties),
@@ -159,20 +161,24 @@ def partition_data(labels, parties = 10, classes_in_use = range(10),
     else:
         print("Could not balance the distribution.")
 
-    cumsums = np.cumsum(dists, axis=0)
+    class_cum = np.cumsum(dists, axis=0)
     idxs = [np.array([],dtype=int)] * parties
-    counts = np.zeros((parties, len(classes_in_use)),dtype=int)
+    counts = np.zeros((parties, len(classes_in_use)), dtype=int)
 
     for n, cls in enumerate(classes_in_use):
         idx = np.nonzero(labels == cls)[0]
         amount = samples or len(idx)
         if normalize == 'class':
-            cumsums[:,n] /= cumsums[-1,n]
-            dists[1:,n] = np.diff(cumsums[:,n])
-            splits = (cumsums[:,n] * amount).round().astype(int)
+            amount -= parties * min_per_class
+            class_cum[:,n] /= class_cum[-1,n]
+            dists[1:,n] = np.diff(class_cum[:,n])
+            splits = (class_cum[:,n] * amount).round().astype(int)
+            splits = splits + np.arange(1, parties+1) * min_per_class
             idx = np.split(idx, splits)[:-1]
         elif normalize == 'party':
-            splits = (cumsums[:,n] * amount).round().astype(int)
+            amount -= len(classes_in_use) * min_per_class
+            splits = (class_cum[:,n] * amount).round().astype(int)
+            splits = splits + np.arange(1, parties+1) * min_per_class
             idx = np.random.choice(idx, splits[-1], replace=data_overlap)
             idx = np.split(idx, splits)[:-1]
         for i in range(parties):
@@ -259,11 +265,16 @@ def generate_total_indices(targets, classes_in_use = range(10)) -> np.ndarray:
 
 
 def get_idx_artifact_name(cfg):
-    name = f"{cfg['dataset']}_p{cfg['parties']}_n{cfg['partition_normalize']}_s{cfg['samples']}_c{cfg['concentration']}_C{'-'.join(map(str,cfg['classes']))}"
-
+    name = cfg['dataset']
+    name += "_p" + str(cfg['parties'])
+    name += "_n" + str(cfg['partition_normalize'])
+    name += "_s" + str(cfg['samples'])
+    name += "_c" + str(cfg['concentration'])
+    if cfg['min_per_class']:
+        name += "_m" + str(cfg['min_per_class'])
+    name += "_C" + '-'.join(map(str,cfg['classes']))
     if cfg['seed'] != 0:
         name += '_' + str(cfg['seed'])
-
     return name
 
 
@@ -306,7 +317,8 @@ def load_idx_from_artifact(cfg, targets, test_targets):
         idxs, counts, dists = partition_data(
             targets, cfg['parties'], cfg['classes'],
             cfg['partition_normalize'], cfg['samples'],
-            cfg['concentration'], cfg['partition_overlap'])
+            cfg['concentration'], cfg['min_per_class'],
+            cfg['partition_overlap'])
 
 
         test_idxs = partition_by_dist(test_targets, cfg['classes'], dists)
