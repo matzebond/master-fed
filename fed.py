@@ -594,11 +594,11 @@ class FedWorker:
         if self.cfg['alignment_distillation_loss']:
             if self.cfg['alignment_distillation_target'] == 'logits' \
                 or self.cfg['alignment_distillation_target'] == 'both':
-                distill_loss = self.alignment_loss_fn(temp_logits, targets['logits'])
+                distill_loss = self.distill_loss_fn(temp_logits, targets['logits'])
                 losses['dist-logit'] = self.cfg['alignment_distillation_weight'] * distill_loss
             if self.cfg['alignment_distillation_target'] == 'rep' \
                 or self.cfg['alignment_distillation_target'] == 'both':
-                distill_loss = self.alignment_loss_fn(temp_rep, targets['rep'])
+                distill_loss = self.distill_loss_fn(temp_rep, targets['rep'])
                 losses['dist-rep'] = self.cfg['alignment_distillation_weight'] * distill_loss
 
         loss = sum(losses.values())
@@ -613,17 +613,19 @@ class FedWorker:
         self.setup()
 
         if alignment_data != None and alignment_targets != None:
-            self.alignment_loss_fn = None
             if self.cfg['alignment_distillation_loss'] == "MSE":
-                self.alignment_loss_fn = nn.MSELoss()
-            if self.cfg['alignment_distillation_loss'] == "L1":
-                self.alignment_loss_fn = nn.L1Loss()
-            if self.cfg['alignment_distillation_loss'] == "SmoothL1":
-                self.alignment_loss_fn = nn.SmoothL1Loss()
-            if self.cfg['alignment_distillation_loss'] == "CE":
-                self.alignment_loss_fn = nn.CrossEntropyLoss()
-            if self.cfg['alignment_distillation_loss'] == "KL":
-                self.alignment_loss_fn = KLDivSoftmaxLoss(log_target=True, reduction='batchmean')
+                self.distill_loss_fn = nn.MSELoss()
+            elif self.cfg['alignment_distillation_loss'] == "L1":
+                self.distill_loss_fn = nn.L1Loss()
+            elif self.cfg['alignment_distillation_loss'] == "SmoothL1":
+                self.distill_loss_fn = nn.SmoothL1Loss()
+            elif self.cfg['alignment_distillation_loss'] == "CE":
+                self.distill_loss_fn = nn.CrossEntropyLoss()
+            elif self.cfg['alignment_distillation_loss'] == "KL":
+                self.distill_loss_fn = KLDivSoftmaxLoss(
+                    log_target=True, reduction='batchmean')
+            else:
+                self.distill_loss_fn = None
             alignment_ds = MyTensorDataset(alignment_data, alignment_labels,
                                            alignment_targets)
             alignment_dl = DataLoader(alignment_ds, shuffle=True,
@@ -633,7 +635,7 @@ class FedWorker:
                                                         self.evaluate,
                                                         "alignment", self.private_dls):
                 alignment_tr.run(alignment_dl, self.cfg['alignment_matching_epochs'])
-            del self.alignment_loss_fn
+            del self.distill_loss_fn
 
         if global_model:
             self.global_model = global_model.to(self.device)
@@ -645,7 +647,7 @@ class FedWorker:
         collab_tr = Engine(self.train_collab)
 
         with collab_tr.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
-                                            "private_training", self.private_dls):
+                                         "private_training", self.private_dls):
             collab_tr.run(self.private_dl, self.cfg['private_training_epochs'])
         
         if self.cfg['private_training_epochs'] > 0:
@@ -864,7 +866,7 @@ def fed_main(cfg):
         stages_todo = state['stages_todo']
 
     if "global_init_public" in stages_todo:
-        _, (acc, loss) = global_worker.init_public(cfg['global_init_public_epochs'])
+        _, (acc, loss) = global_worker.init_public(epochs=cfg['global_init_public_epochs'])
         wandb.run.summary["global_init_public/acc"] = acc
         wandb.run.summary["global_init_public/loss"] = loss
         if cfg['umap']:
