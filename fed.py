@@ -623,7 +623,7 @@ class FedWorker:
                 self.distill_loss_fn = nn.CrossEntropyLoss()
             elif self.cfg['alignment_distillation_loss'] == "KL":
                 self.distill_loss_fn = KLDivSoftmaxLoss(
-                    log_target=True, reduction='batchmean')
+                    log_target=False, reduction='batchmean')
             else:
                 self.distill_loss_fn = None
             alignment_ds = MyTensorDataset(alignment_data, alignment_labels,
@@ -688,7 +688,7 @@ class FedWorker:
         loss = sum(losses.values())
         loss.backward()
         self.optimizer.step()
-        return loss.detach().item(), {k: l.detach().item() for k,l in losses}
+        return loss.detach().item(), {k: l.detach().item() for k,l in losses.items()}
 
     @torch.no_grad()
     def umap_viz(self, data, test_data):
