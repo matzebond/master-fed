@@ -30,7 +30,8 @@ import matplotlib.pyplot as plt
 import ast
 
 import models
-from data import get_priv_pub_data, load_idx_from_artifact, build_private_dls
+from data import (get_priv_pub_data, load_idx_from_artifact,
+                  build_private_dls, get_subset)
 import util
 from util import MyTensorDataset, set_seed
 import umap_util
@@ -40,7 +41,7 @@ from nn import (KLDivSoftmaxLoss, avg_params, optim_to,
                 moon_contrastive_loss)
 
 
-individual_cfgs = ['model_mapping', 'init_public_epochs', 'init_private_epochs', 'collab_participation', 'private_training_epochs']
+individual_cfgs = ['model_mapping', 'init_via_global_epochs', 'init_public_epochs', 'init_private_epochs', 'collab_participation', 'private_training_epochs']
 
 def build_parser():
     def float_or_string(string):
@@ -68,12 +69,13 @@ def build_parser():
                       help='number of round in the collaboration phase')
     base.add_argument('--stages', nargs='*',
                       default=['init_public', 'init_private', 'collab'],
-                      choices=['global_init_public', 'save_global_init_public', 'load_global_init_public', 'init_public', 'save_init_public', 'load_init_public', 'init_private', 'save_init_private', 'load_init_private', 'collab', 'save_collab'],
+                      choices=['global_init_public', 'save_global_init_public', 'load_global_init_public', 'init_public', 'init_via_global', 'save_init_public', 'load_init_public', 'init_private', 'save_init_private', 'load_init_private', 'collab', 'save_collab'],
                       help='list of phases that are executed (default: %(default)s)')
 
     # model
     model = parser.add_argument_group('model')
-    model.add_argument('--model_variant', default='FedMD_CIFAR', choices=['FedMD_CIFAR', 'LLP', 'LeNet_plus_plus'],
+    model.add_argument('--model_variant', default='FedMD_CIFAR',
+                       choices=['FedMD_CIFAR', 'LLP', 'LeNet_plus_plus'],
                        help='')
     model.add_argument('--model_mapping', nargs='*', type=int,
                        help='')
@@ -86,9 +88,11 @@ def build_parser():
 
     # data
     data = parser.add_argument_group('data')
-    data.add_argument('--dataset', default='CIFAR100', choices=['CIFAR100', 'CIFAR10', 'MNIST'],
+    data.add_argument('--dataset', default='CIFAR100',
+                      choices=['CIFAR100', 'CIFAR10', 'MNIST'],
                       help='')
-    data.add_argument('--public_dataset', default=None, choices=['CIFAR100', 'CIFAR10', 'MNIST', 'same'],
+    data.add_argument('--public_dataset', default=None,
+                      choices=['CIFAR100', 'CIFAR10', 'MNIST', 'same'],
                       help='')
     data.add_argument('--classes', nargs='+', type=int,
                       metavar='CLASS',
@@ -134,15 +138,20 @@ def build_parser():
     #                       metavar='LR',
     #                       help='public training learning rate')
 
-    training.add_argument('--init_public_epochs', default=0, nargs='+', type=int,
-                          metavar='EPOCHS',
-                          help='number of training epochs on the public data in the initial public training stage')
     training.add_argument('--global_init_public_epochs', default=None, type=int,
                           metavar='EPOCHS',
                           help='number of training epochs the global model should pretrain on the public data')
+    training.add_argument('--init_public_epochs', default=0, nargs='+', type=int,
+                          metavar='EPOCHS',
+                          help='number of training epochs on the public data in the initial public training stage')
     training.add_argument('--init_public_batch_size', default=32, type=int,
                           metavar='BATCHSIZE',
                           help='size of the mini-batches in the initial public training')
+    training.add_argument('--init_via_global_epochs', default=0, nargs='+', type=int,
+                          metavar='EPOCHS',
+                          help='number of training epochs on the public data in the initial via global training stage')
+    training.add_argument('--init_via_global_target', choices=['rep', 'logits'],
+                          help="in the initial public training use the representation of the global model as target")
     training.add_argument('--init_private_epochs', default=0, nargs='+', type=int,
                           metavar='EPOCHS',
                           help='number of training epochs on the private data in the initial private training stage')
@@ -481,6 +490,56 @@ class FedWorker:
         self.teardown()
         return res
 
+
+    def train_via_global(self, _, batch):
+        self.model.train()
+        self.optimizer.zero_grad()
+        x, y = util.prepare_batch(batch, device=self.device)
+        local_logits, local_rep = self.model(x, output='both')
+        losses = {}
+
+        with torch.no_grad():
+            g_logits, g_rep = self.global_model(x, output='both')
+            g_logits = g_logits / self.cfg['alignment_temperature']
+            g_rep = g_rep / self.cfg['alignment_temperature']
+            if self.cfg['alignment_distillation_loss'] == 'KL':
+                g_logits = F.softmax(g_logits, dim=-1)
+                g_rep = F.softmax(g_rep, dim=-1)
+        temp_rep = local_rep / self.cfg['alignment_temperature']
+        temp_logits = local_logits / self.cfg['alignment_temperature']
+
+        if self.cfg['init_via_global_target'] == 'logits':
+            losses['dist-logit'] = self.distill_loss_fn(temp_logits, g_logits)
+        elif self.cfg['init_via_global_target'] == 'rep':
+            losses['dist-rep'] = self.distill_loss_fn(temp_rep, g_rep)
+
+        loss = sum(losses.values())
+        loss.backward()
+        self.optimizer.step()
+        return loss.detach().item(), {k: l.detach().item() for k,l in losses.items()}
+
+    @self_dec
+    def init_via_global(self, global_model=None, epochs=None):
+        print(f"party {self.cfg['rank']}: start 'init_via_global' stage")
+        self.model.change_classes(self.cfg['num_public_classes'])
+        self.gstep = 0
+        self.setup()
+
+        if global_model:
+            self.global_model = global_model.to(self.device)
+            self.global_model.eval()
+
+        public_tr = Engine(self.train_via_global)
+        public_tr.add_event_handler(Events.EPOCH_COMPLETED, self.evaluate,
+                                    "init_via_global", {}, add_stage=True)
+        if epochs is None:
+            epochs = self.cfg['init_via_global_epochs']
+        public_tr.run(public_train_dl, epochs)
+
+        if global_model:
+            del self.global_model
+
+        self.teardown()
 
     @self_dec
     def upper_bound(self, epochs=None):
@@ -894,6 +953,12 @@ def fed_main(cfg):
                     dill.dumps(combined_test_dl),
                     dill.dumps(public_train_dl),
                     dill.dumps(public_test_dl)])
+
+    if "init_via_global" in stages_todo:
+        print("All parties starting with 'init_via_global'")
+        res = pool.starmap(FedWorker.init_via_global,
+                           zip(workers, repeat(global_worker.model)))
+        [workers, res] = list(zip(*res))
 
     if "init_public" in stages_todo:
         print("All parties starting with 'init_public'")

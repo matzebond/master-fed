@@ -3,7 +3,7 @@ global cfg
 cfg = {
     'parties': 1,
     'collab_rounds': 1,
-    'stages': ['load_global_init_public', 'init_public', 'init_private', 'collab', 'save_collab'],
+    'stages': ['load_global_init_public', 'init_via_global', 'init_public', 'init_private', 'collab', 'save_collab'],
 
     'model_variant': 'LPP',
     'global_model_mapping': 4,
@@ -12,13 +12,13 @@ cfg = {
     'projection_head': 500,
 
     'dataset': 'CIFAR10',
-    'public_dataset': 'same',
     'classes': None,
     'samples': None,
     'concentration': 'iid',
     'partition_normalize': 'class',
     # 'partition_normalize': 'party',
     # 'samples': 5000,
+    'public_dataset': 'CIFAR10',
 
     'variant': None,
     'global_model': 'fix',
