@@ -329,12 +329,28 @@ class FedWorker:
                             "private_test": self.private_test_dl,
                             "combined_test": combined_test_dl}
 
+        if self.cfg['alignment_distillation_loss'] == "MSE":
+            self.distill_loss_fn = nn.MSELoss()
+        elif self.cfg['alignment_distillation_loss'] == "L1":
+            self.distill_loss_fn = nn.L1Loss()
+        elif self.cfg['alignment_distillation_loss'] == "SmoothL1":
+            self.distill_loss_fn = nn.SmoothL1Loss()
+        elif self.cfg['alignment_distillation_loss'] == "CE":
+            self.distill_loss_fn = nn.CrossEntropyLoss()
+        elif self.cfg['alignment_distillation_loss'] == "KL":
+            self.distill_loss_fn = KLDivSoftmaxLoss(
+                log_target=False, reduction='batchmean')
+        else:
+            self.distill_loss_fn = None
+
+
         self.writer = SummaryWriter(self.cfg['path']) if writer else None
 
 
     def teardown(self):
         del self.trainer, self.evaluator
         del self.private_dl, self.private_test_dl, self.public_dls, self.private_dls
+        del self.distill_loss_fn
         del self.writer
 
         self.model = self.model.cpu()
@@ -613,19 +629,6 @@ class FedWorker:
         self.setup()
 
         if alignment_data != None and alignment_targets != None:
-            if self.cfg['alignment_distillation_loss'] == "MSE":
-                self.distill_loss_fn = nn.MSELoss()
-            elif self.cfg['alignment_distillation_loss'] == "L1":
-                self.distill_loss_fn = nn.L1Loss()
-            elif self.cfg['alignment_distillation_loss'] == "SmoothL1":
-                self.distill_loss_fn = nn.SmoothL1Loss()
-            elif self.cfg['alignment_distillation_loss'] == "CE":
-                self.distill_loss_fn = nn.CrossEntropyLoss()
-            elif self.cfg['alignment_distillation_loss'] == "KL":
-                self.distill_loss_fn = KLDivSoftmaxLoss(
-                    log_target=False, reduction='batchmean')
-            else:
-                self.distill_loss_fn = None
             alignment_ds = MyTensorDataset(alignment_data, alignment_labels,
                                            alignment_targets)
             alignment_dl = DataLoader(alignment_ds, shuffle=True,
@@ -635,7 +638,6 @@ class FedWorker:
                                                         self.evaluate,
                                                         "alignment", self.private_dls):
                 alignment_tr.run(alignment_dl, self.cfg['alignment_matching_epochs'])
-            del self.distill_loss_fn
 
         if global_model:
             self.global_model = global_model.to(self.device)
