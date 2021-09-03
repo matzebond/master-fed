@@ -177,7 +177,7 @@ def build_parser():
     variant.add_argument('--contrastive_loss_temperature', type=float,
                          metavar='TEMP')
     variant.add_argument('--alignment_data', nargs="?",
-                         choices=['public', 'random'],
+                         choices=['public', 'private', 'noise'],
                          help='data to use for the alignment step')
     variant.add_argument('--alignment_target', nargs="?",
                          choices=['logits', 'rep', 'both'],
@@ -951,31 +951,17 @@ def fed_main(cfg):
             alignment_data, alignment_labels, agg_alignment_targets = None, None, {}
             if cfg['alignment_data']:
                 if cfg['alignment_data'] == "public":
-                    if cfg['alignment_size'] == "full" and not cfg['samples'] is None:
-                        print(f"Alignment Data: all {len(public_train_dl.dataset)} examples from the public dataset")
-                        alignment_dl = DataLoader(
-                            public_train_dl.dataset,
-                            batch_size=len(public_train_dl.dataset))
-                        alignment_data, alignment_labels = next(iter(alignment_dl))
-                    elif cfg['alignment_size'] == "full":
-                        print(f"Alignment Data: all {len(public_train_data)} examples from the public dataset")
-                        alignment_data, alignment_labels = list(zip(*public_train_data))
-                        alignment_data = torch.stack(alignment_data)
-                        alignment_labels = torch.tensor(alignment_labels)
-                    else:
-                        print(f"Alignment Data: {cfg['alignment_size']} random examples from the public dataset")
-                        idxs = np.random.choice(len(public_train_data),
-                                                cfg['alignment_size'],
-                                                replace = False)
-                        alignment_dl = DataLoader(Subset(public_train_data, idxs),
-                                                  batch_size=cfg['alignment_size'])
-                        alignment_data, alignment_labels = next(iter(alignment_dl))
-                elif cfg['alignment_data'] == "random":
-                    print(f"Alignment Data: {cfg['alignment_size']} random noise inputs")
+                    alignment_data, alignment_labels = \
+                        get_subset(public_train_dl.dataset, cfg['alignment_size'])
+                elif cfg['alignment_data'] == "private":
+                    alignment_data, alignment_labels = \
+                        get_subset(combined_dl.dataset, cfg['alignment_size'])
+                elif cfg['alignment_data'] == "noise":
                     alignment_data = torch.rand([cfg['alignment_size']]
                                                 + list(private_train_data[0][0].shape))
                 else:
-                    raise NotImplementedError(f"alignment_data '{cfg['alignment_data']}' is unknown")
+                    raise NotImplementedError(
+                        f"alignment_data '{cfg['alignment_data']}' is unknown")
 
                 if cfg['alignment_aggregate'] == "global":
                     agg_alignment_targets = global_worker.get_alignment(alignment_data)

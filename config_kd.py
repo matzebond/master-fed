@@ -28,7 +28,7 @@ cfg = {
 
     'global_init_public_epochs': 100,
 
-    'alignment_data': 'public',
+    'alignment_data': 'private',
     'alignment_size': 'full',
     'alignment_aggregate': 'global',
     'alignment_target': 'both',

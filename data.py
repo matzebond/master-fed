@@ -406,3 +406,11 @@ def get_moon_indices(dataset='CIFAR10', parties = 10, concentration = 0.5, seed=
 
     dists = (np.array([(counts[i] / s) for i,s in enumerate(counts.sum(axis=1))]))
     return idxs, counts, dists
+
+
+def get_subset(dataset, size):
+    if size == "full":
+        size = len(dataset)
+    dl = DataLoader(dataset, batch_size=size)
+    data, labels = next(iter(dl))
+    return data, labels
