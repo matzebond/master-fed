@@ -223,6 +223,8 @@ def build_parser():
                          help='size of the mini-batches in the alignment')
     variant.add_argument('--alignment_temperature', type=float, metavar='TEMP',
                          help='temperature  alignment')
+    variant.add_argument('--alignment_optim', default='all', choices=['all', 'output'],
+                         help="the submodule that should be updated by the alignment optimizer")
     variant.add_argument('--locality_preserving_k', default=5, type=int, metavar='K',
                          help='the number of neighbors to use in the locality preserving loss')
 
@@ -313,6 +315,25 @@ class FedWorker:
         else:
             raise Exception('unknown optimizer ' + self.cfg['optim'])
 
+        if self.cfg['alignment_optim'] == "output":
+            if self.cfg['optim'] == 'Adam':
+                self.optimizer_output = torch.optim.Adam(
+                    self.model.get_submodule("output").parameters(),
+                    lr=self.cfg['optim_lr'],
+                    weight_decay=self.cfg['optim_weight_decay'])
+            elif self.cfg['optim'] == 'SGD':
+                self.optimizer_output = torch.optim.SGD(
+                    self.model.get_submodule("output").parameters(),
+                    lr=self.cfg['optim_lr'],
+                    weight_decay=self.cfg['optim_weight_decay'])
+            elif self.cfg['optim'] == 'RMSprop':
+                self.optimizer_output = torch.optim.RMSprop(
+                    self.model.get_submodule("output").parameters(),
+                    lr=self.cfg['optim_lr'],
+                    weight_decay=self.cfg['optim_weight_decay'])
+            else:
+                raise Exception('unknown optimizer ' + self.cfg['optim'])
+
     def setup(self, writer=True):
         self.decive = device
         self.model = self.model.to(self.device)
@@ -364,6 +385,9 @@ class FedWorker:
 
         self.model = self.model.cpu()
         self.optimizer = optim_to(self.optimizer, "cpu")
+
+        if self.cfg['alignment_optim'] == "output":
+            self.optimizer_output = optim_to(self.optimizer_output, "cpu")
 
 
     def finish(self):
@@ -678,7 +702,10 @@ class FedWorker:
 
         loss = sum(losses.values())
         loss.backward()
-        self.optimizer.step()
+        if self.cfg['alignment_optim'] == 'all':
+            self.optimizer.step()
+        elif self.cfg['alignment_optim'] == 'output':
+            self.optimizer_output.step()
         return loss.detach().item(), {k: l.detach().item() for k,l in losses.items()}
 
 
@@ -748,7 +775,10 @@ class FedWorker:
 
         loss = sum(losses.values())
         loss.backward()
-        self.optimizer.step()
+        if self.cfg['alignment_optim'] == 'all':
+            self.optimizer.step()
+        elif self.cfg['alignment_optim'] == 'output':
+            self.optimizer_output.step()
         return loss.detach().item(), {k: l.detach().item() for k,l in losses.items()}
 
     @torch.no_grad()
