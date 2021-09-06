@@ -702,8 +702,10 @@ class FedWorker:
                 num = len(self.augment_data[l])
                 i = np.random.randint(num)
                 augments.append(self.augment_data[l][i])
-            augments = torch.stack(augments).to(self.device)
-            targets[self.cfg['alignment_distillation_target']][idx] = augments
+
+            if augments:
+                augments = torch.stack(augments).to(self.device)
+                targets[self.cfg['alignment_distillation_target']][idx] = augments
 
         if self.cfg['alignment_distillation_loss']:
             if self.cfg['alignment_distillation_target'] == 'logits' \
