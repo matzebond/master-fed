@@ -202,6 +202,10 @@ def build_parser():
     variant.add_argument('--alignment_distillation_target', nargs="?",
                          choices=['logits', 'rep', 'both'],
                          help='target to use for the distillation loss')
+    variant.add_argument('--alignment_distillation_augmentation', type=float,
+                         help='propability of swapping the true distill target with a random target of the same class')
+    variant.add_argument('--alignment_augmentation_data', choices=['public', 'private'],
+                         help='the data source for the alignment augmentation data')
     variant.add_argument('--alignment_distillation_weight', default=1, type=float,
                          metavar='WEIGHT',
                          help="weight for the alignment distillation loss")
@@ -690,6 +694,17 @@ class FedWorker:
                                                self.cfg['locality_preserving_k'])
             losses['lp'] = self.cfg['alignment_additional_loss_weight'] * lp_loss
 
+        if self.cfg['alignment_distillation_augmentation']:
+            idx = torch.rand(y.shape[0], device=self.device) \
+                < self.cfg['alignment_distillation_augmentation']
+            augments = []
+            for l in y[idx].cpu():
+                num = len(self.augment_data[l])
+                i = np.random.randint(num)
+                augments.append(self.augment_data[l][i])
+            augments = torch.stack(augments).to(self.device)
+            targets[self.cfg['alignment_distillation_target']][idx] = augments
+
         if self.cfg['alignment_distillation_loss']:
             if self.cfg['alignment_distillation_target'] == 'logits' \
                 or self.cfg['alignment_distillation_target'] == 'both':
@@ -711,7 +726,8 @@ class FedWorker:
 
     @self_dec
     def collab_round(self, alignment_data=None, alignment_labels=None,
-                     alignment_targets=None, global_model=None):
+                     alignment_targets=None, alignment_augmentation=None,
+                     global_model=None):
         self.setup()
 
         if alignment_data != None and alignment_targets != None:
@@ -719,11 +735,14 @@ class FedWorker:
                                            alignment_targets)
             alignment_dl = DataLoader(alignment_ds, shuffle=True,
                                       batch_size=self.cfg['alignment_matching_batch_size'])
+
+            self.augment_data = alignment_augmentation
             alignment_tr = Engine(self.train_alignment)
             with alignment_tr.add_event_handler(Events.EPOCH_COMPLETED,
                                                         self.evaluate,
                                                         "alignment", self.private_dls):
                 alignment_tr.run(alignment_dl, self.cfg['alignment_matching_epochs'])
+            del self.augment_data
 
         if global_model:
             self.global_model = global_model.to(self.device)
@@ -1079,11 +1098,32 @@ def fed_main(cfg):
                         elif cfg['alignment_aggregate'] == "all":
                             agg_alignment_targets[key] = tmp
 
+            alignment_augmentation = None
+            if cfg['alignment_distillation_augmentation']:
+                augment_data, augment_labels = None, None
+                if cfg['alignment_augmentation_data'] == 'public':
+                    augment_data, augment_labels = \
+                        get_subset(public_train_dl.dataset, "full")
+                elif cfg['alignment_augmentation_data'] == 'private':
+                    augment_data, augment_labels = \
+                        get_subset(combined_dl.dataset, "full")
+
+                augment_targets = global_worker.get_alignment(augment_data)
+
+                alignment_augmentation = defaultdict(list)
+                for t,l in zip(augment_targets[cfg['alignment_distillation_target']],
+                               augment_labels):
+                    class_idx = cfg['classes'].index(l)
+                    alignment_augmentation[class_idx].append(t)
+                alignment_augmentation = [torch.stack(x) for x in alignment_augmentation.values()]
+
+
             res = pool.starmap(FedWorker.collab_round,
                                zip(workers,
                                    repeat(alignment_data),
                                    repeat(alignment_labels),
                                    repeat(agg_alignment_targets),
+                                   repeat(alignment_augmentation),
                                    repeat(global_worker.model \
                                           if cfg['send_global'] else None)))
             [workers, res] = list(zip(*res))
