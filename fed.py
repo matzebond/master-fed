@@ -239,7 +239,10 @@ def build_parser():
     util.add_argument('--seed', default=0, type=int,
                       help="the seed with which to initialize numpy, torch, cuda and random")
     util.add_argument('--name', help='name of the wandb run')
-    util.add_argument('--artifact_project', help='load artifacts from this wandb project')
+    util.add_argument('--project', default="maschm/dump",
+                      help='log to this wandb project')
+    util.add_argument('--artifact_project', default="maschm/master-fed",
+                      help='load artifacts from this wandb project')
     util.add_argument('--resumable', action='store_true',
                       help="resume form the previous run (need to be resumable) if it chrashed")
     util.add_argument('--umap', action='store_true',
@@ -846,9 +849,8 @@ class FedGlobalWorker(FedWorker):
 
 
 def fed_main(cfg):
-    if cfg['artifact_project'] is None:
-        cfg['artifact_project'] = "maschm/master-fed"
-    wandb.init(project='master-fed', entity='maschm',
+    wandb_p, wandb_e = cfg['project'].split('/')
+    wandb.init(project=wandb_p, entity=wandb_e,
                name=cfg['name'],
                config=cfg, #sync_tensorboard=True,
                resume=cfg['resumable'])
