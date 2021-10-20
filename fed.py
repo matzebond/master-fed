@@ -1066,7 +1066,7 @@ def fed_main(cfg):
 
         for n in range(start_round, cfg['collab_rounds']):
             print(f"All parties starting with collab round [{n+1}/{cfg['collab_rounds']}]")
-            alignment_data, alignment_labels, agg_alignment_targets = None, None, {}
+            dist_alignment_data, dist_alignment_labels, dist_agg_alignment_targets = None, None, {}
             if cfg['alignment_data']:
                 if cfg['alignment_data'] == "public":
                     alignment_data, alignment_labels = \
@@ -1075,12 +1075,14 @@ def fed_main(cfg):
                     alignment_data, alignment_labels = \
                         get_subset(combined_dl.dataset, cfg['alignment_size'])
                 elif cfg['alignment_data'] == "noise":
+                    alignment_labels = []
                     alignment_data = torch.rand([cfg['alignment_size']]
                                                 + list(private_train_data[0][0].shape))
                 else:
                     raise NotImplementedError(
                         f"alignment_data '{cfg['alignment_data']}' is unknown")
 
+                agg_alignment_targets = {}
                 if cfg['alignment_aggregate'] == "global":
                     agg_alignment_targets = global_worker.get_alignment(alignment_data)
                 else:
@@ -1100,7 +1102,26 @@ def fed_main(cfg):
                         elif cfg['alignment_aggregate'] == "all":
                             agg_alignment_targets[key] = tmp
 
-            alignment_augmentation = None
+                if cfg['alignment_aggregate'] == "global" and \
+                   cfg['alignment_data'] == "private":
+                    # split alignment for each party
+                    splits = [len(d.dataset) for d in private_dls]
+                    dist_alignment_data = torch.split(alignment_data, splits)
+                    dist_alignment_labels = torch.split(alignment_labels, splits)
+
+                    dist_agg_alignment_targets = [{} for _ in range(cfg['parties'])]
+                    for key in agg_alignment_targets:
+                        key_splits = torch.split(agg_alignment_targets[key], splits)
+                        for i, s in enumerate(key_splits):
+                            dist_agg_alignment_targets[i][key] = s
+
+                else:
+                    dist_alignment_data = repeat(alignment_data)
+                    dist_alignment_labels = repeat(alignment_labels)
+                    dist_agg_alignment_targets = repeat(agg_alignment_targets)
+
+
+            dist_alignment_augmentation = repeat(None)
             if cfg['alignment_distillation_augmentation']:
                 augment_data, augment_labels = None, None
                 if cfg['alignment_augmentation_data'] == 'public':
@@ -1118,14 +1139,15 @@ def fed_main(cfg):
                     class_idx = cfg['classes'].index(l)
                     alignment_augmentation[class_idx].append(t)
                 alignment_augmentation = [torch.stack(x) for x in alignment_augmentation.values()]
+                dist_alignment_augmentation = repeat(alignment_augmentation)
 
 
             res = pool.starmap(FedWorker.collab_round,
                                zip(workers,
-                                   repeat(alignment_data),
-                                   repeat(alignment_labels),
-                                   repeat(agg_alignment_targets),
-                                   repeat(alignment_augmentation),
+                                   dist_alignment_data,
+                                   dist_alignment_labels,
+                                   dist_agg_alignment_targets,
+                                   dist_alignment_augmentation,
                                    repeat(global_worker.model \
                                           if cfg['send_global'] else None)))
             [workers, res] = list(zip(*res))
