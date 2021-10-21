@@ -849,7 +849,7 @@ class FedGlobalWorker(FedWorker):
 
 
 def fed_main(cfg):
-    wandb_p, wandb_e = cfg['project'].split('/')
+    wandb_e, wandb_p = cfg['project'].split('/')
     wandb.init(project=wandb_p, entity=wandb_e,
                name=cfg['name'],
                config=cfg, #sync_tensorboard=True,
