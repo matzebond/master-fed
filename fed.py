@@ -119,6 +119,10 @@ def build_parser():
                       help="don't use normalization in the data preprocessing")
     data.add_argument('--datafolder', default='data', type=str,
                       help="place of the datasets (will be downloaded if not present)")
+    data.add_argument('--fake_public_classes', type=int,
+                      help="override the actual number of public classes")
+    data.add_argument('--fake_private_classes', type=int,
+                      help="override the actual number of private classes")
 
     # training
     training = parser.add_argument_group('training')
@@ -881,8 +885,14 @@ def fed_main(cfg):
             if c >= len(private_train_data.classes) or c < 0:
                 raise Exception("--classes out of range")
 
-    cfg['num_public_classes'] = len(public_train_data.classes)
-    cfg['num_private_classes'] = len(cfg['classes'])
+    if cfg['fake_public_classes']:
+        cfg['num_public_classes'] = cfg['fake_public_classes']
+    else:
+        cfg['num_public_classes'] = len(public_train_data.classes)
+    if cfg['fake_private_classes']:
+        cfg['num_private_classes'] = cfg['fake_private_classes']
+    else:
+        cfg['num_private_classes'] = len(cfg['classes'])
 
     private_idxs, private_test_idxs = load_idx_from_artifact(
         cfg,
