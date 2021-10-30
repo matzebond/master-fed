@@ -233,6 +233,8 @@ def build_parser():
                          help='temperature  alignment')
     variant.add_argument('--alignment_optim', default='all', choices=['all', 'output'],
                          help="the submodule that should be updated by the alignment optimizer")
+    variant.add_argument('--private_optim', default='all', choices=['all', 'output'],
+                         help="the submodule that should be updated by the private optimizer")
     variant.add_argument('--locality_preserving_k', default=5, type=int, metavar='K',
                          help='the number of neighbors to use in the locality preserving loss')
 
@@ -326,7 +328,8 @@ class FedWorker:
         else:
             raise Exception('unknown optimizer ' + self.cfg['optim'])
 
-        if self.cfg['alignment_optim'] == "output":
+        if (self.cfg['alignment_optim'] == "output" or
+            self.cfg['private_optim'] == "output"):
             if self.cfg['optim'] == 'Adam':
                 self.optimizer_output = torch.optim.Adam(
                     self.model.get_submodule("output").parameters(),
@@ -397,7 +400,8 @@ class FedWorker:
         self.model = self.model.cpu()
         self.optimizer = optim_to(self.optimizer, "cpu")
 
-        if self.cfg['alignment_optim'] == "output":
+        if (self.cfg['alignment_optim'] == "output" or
+            self.cfg['private_optim'] == "output"):
             self.optimizer_output = optim_to(self.optimizer_output, "cpu")
 
 
@@ -803,9 +807,9 @@ class FedWorker:
 
         loss = sum(losses.values())
         loss.backward()
-        if self.cfg['alignment_optim'] == 'all':
+        if self.cfg['private_optim'] == 'all':
             self.optimizer.step()
-        elif self.cfg['alignment_optim'] == 'output':
+        elif self.cfg['private_optim'] == 'output':
             self.optimizer_output.step()
         return loss.detach().item(), {k: l.detach().item() for k,l in losses.items()}
 
