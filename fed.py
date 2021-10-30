@@ -352,6 +352,9 @@ class FedWorker:
         self.decive = device
         self.model = self.model.to(self.device)
         optim_to(self.optimizer, self.device)
+        if (self.cfg['alignment_optim'] == "output" or
+            self.cfg['private_optim'] == "output"):
+            optim_to(self.optimizer_output, self.device)
 
         self.trainer = create_supervised_trainer(
             self.model,
