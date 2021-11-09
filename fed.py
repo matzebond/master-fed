@@ -1009,14 +1009,20 @@ def fed_main(cfg):
         if cfg['umap']:
             global_worker.umap_viz(public_train_data, public_test_data)
         if "save_global_init_public" in stages_todo:
-            util.save_models_to_artifact(cfg, [global_worker],
+            _cfg = cfg.copy()
+            if cfg['global_projection_head'] != 500:
+                _cfg['model_variant'] += f"_p{cfg['global_projection_head']}"
+            util.save_models_to_artifact(_cfg, [global_worker],
                                          "global_init_public",
                                          {"acc": acc, "loss": loss},
                                          filename="init_public")
         global_worker.init_private(0)
     elif "load_global_init_public" in stages_todo:
         global_worker.model.change_classes(cfg['num_public_classes'])
-        util.load_models_from_artifact(cfg, [global_worker],
+        _cfg = cfg.copy()
+        if cfg['global_projection_head'] != 500:
+            _cfg['model_variant'] += f"_p{cfg['global_projection_head']}"
+        util.load_models_from_artifact(_cfg, [global_worker],
                                        "global_init_public",
                                        filename="init_public",
                                        project=cfg['artifact_project'])
