@@ -253,6 +253,8 @@ def build_parser():
                       help="resume form the previous run (need to be resumable) if it chrashed")
     util.add_argument('--umap', action='store_true',
                       help="use UMAP to create a 2d visualization from the representations of the model")
+    util.add_argument('--umap_save', action='store_true',
+                      help="save raw data used for creating the UMAP visualizations")
     util.add_argument('--test', action='store_true',
                       help="makes some code regions more expressive while ignoring additional work")
 
@@ -828,8 +830,12 @@ class FedWorker:
 
         embeds, umapper = umap_util.create_umap_embedings(reps)
         test_embeds, _ = umap_util.create_umap_embedings(test_reps, reducer=umapper)
-        # torch.save(embeds, self.cfg['tmp'] / 'embeds.pth')
-        # torch.save(test_embeds, self.cfg['tmp'] / 'test_embeds.pth')
+
+        if self.cfg['umap_save']:
+            torch.save(embeds, self.cfg['path'] / 'embeds.pth')
+            torch.save(labels, self.cfg['path'] / 'labels.pth')
+            torch.save(test_embeds, self.cfg['path'] / 'test_embeds.pth')
+            torch.save(test_labels, self.cfg['path'] / 'test_labels.pth')
 
         ax, sc, fig = umap_util.build_scatter(embeds, labels, size=0.5)
         umap_util.build_colorlegend(fig, data.classes)
