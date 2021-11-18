@@ -1022,6 +1022,7 @@ def fed_main(cfg):
         _cfg = cfg.copy()
         if cfg['global_projection_head'] != 500:
             _cfg['model_variant'] += f"_p{cfg['global_projection_head']}"
+        global_worker.cfg['model_variant'] = _cfg['model_variant']
         util.load_models_from_artifact(_cfg, [global_worker],
                                        "global_init_public",
                                        filename="init_public",
