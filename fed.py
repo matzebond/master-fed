@@ -945,7 +945,7 @@ def fed_main(cfg):
     print("public_dl length:", len(public_train_dl.dataset))
 
 
-    # to mitigate divergence due to loading the indices
+    # mitigate rng divergence due to loading the indices
     set_seed(cfg['seed'])
 
     workers = []
@@ -1098,6 +1098,8 @@ def fed_main(cfg):
 
         for n in range(start_round, cfg['collab_rounds']):
             print(f"All parties starting with collab round [{n+1}/{cfg['collab_rounds']}]")
+
+            # gather alignment output of local and global model
             dist_alignment_data, dist_alignment_labels, dist_agg_alignment_targets = None, None, {}
             if cfg['alignment_data']:
                 if cfg['alignment_data'] == "public":
@@ -1153,6 +1155,7 @@ def fed_main(cfg):
                     dist_agg_alignment_targets = repeat(agg_alignment_targets)
 
 
+            # gather images for feature augmentation
             dist_alignment_augmentation = repeat(None)
             if cfg['alignment_distillation_augmentation']:
                 augment_data, augment_labels = None, None
@@ -1174,6 +1177,7 @@ def fed_main(cfg):
                 dist_alignment_augmentation = repeat(alignment_augmentation)
 
 
+            # local training round
             res = pool.starmap(FedWorker.collab_round,
                                zip(workers,
                                    dist_alignment_data,
@@ -1225,6 +1229,7 @@ def fed_main(cfg):
                     w.model.load_state_dict(global_worker.model.state_dict())
                 print("local models replaced")
 
+            # save state to resume from this round later
             if cfg['resumable']:
                 state = {'round': n, 'stages_todo': stages_todo}
                 torch.save(state, cfg['tmp'] / "state.pt")
@@ -1236,10 +1241,7 @@ def fed_main(cfg):
         if cfg['umap']:
             for w in workers:
                 w.umap_viz(public_train_data, public_test_data)
-            # Starting a Matplotlib GUI outside of the main thread will likely fail.
-            # res = pool.starmap(FedWorker.umap_viz,
-            #                    zip(workers,
-            #                        repeat(public_test_data)))
+
 
     if "save_collab" in stages_todo:
         for w in workers:
